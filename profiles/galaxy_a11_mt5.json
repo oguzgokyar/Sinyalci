@@ -1,0 +1,56 @@
+{
+  "device": "Samsung Galaxy A11 (SM-A115F)",
+  "resolution": [720, 1560],
+  "app": "MetaTrader 5 Android (Turkish)",
+  "account_type": "Demo",
+  "navigation": {
+    "tab_quotes": [80, 1395],
+    "tab_charts": [220, 1395],
+    "tab_trade": [360, 1395],
+    "tab_history": [500, 1395],
+    "tab_messages": [640, 1395],
+    "hamburger_menu": [45, 120],
+    "btn_add_symbol": [605, 120],
+    "btn_new_order_header": [674, 127]
+  },
+  "quotes_screen": {
+    "row_height": 90,
+    "first_row_center": [360, 230],
+    "context_menu": {
+      "new_order": [360, 973],
+      "chart": [360, 1057],
+      "properties": [360, 1141],
+      "depth": [360, 1225],
+      "statistics": [360, 1309]
+    }
+  },
+  "new_order_screen": {
+    "symbol_header": [140, 112],
+    "order_type_dropdown": [364, 229],
+    "lot_field": [349, 314],
+    "lot_roi": [300, 290, 400, 340],
+    "quick_lot_buttons": {
+      "minus_0_5": [77, 314],
+      "minus_0_1": [160, 314],
+      "minus_0_01": [251, 313],
+      "plus_0_01": [449, 314],
+      "plus_0_1": [549, 314],
+      "plus_0_5": [642, 314]
+    },
+    "bid_roi": [170, 365, 340, 430],
+    "ask_roi": [380, 365, 550, 430],
+    "sl_field": [187, 482],
+    "sl_roi": [110, 455, 260, 510],
+    "tp_field": [534, 483],
+    "tp_roi": [460, 455, 610, 510],
+    "sell_button": [180, 1436],
+    "buy_button": [540, 1436],
+    "back_button": [40, 120]
+  },
+  "trade_screen": {
+    "balance_row_y": 211,
+    "equity_row_y": 260,
+    "free_margin_row_y": 310,
+    "positions_start_y": 348
+  }
+}
