@@ -1,4 +1,4 @@
-# Phone Trader
+# Sinyalci
 
 Fiziksel Android cihazlar üzerinden resmi **MetaTrader 5** uygulaması aracılığıyla organik mobil işlem (`ORDER_REASON_MOBILE: 1`, `Magic: 0`) gerçekleştiren, **Lokal PC** ve **VPS Bulut (4.5G Ters Tünel)** destekli işlem yürütme paneli.
 
@@ -23,8 +23,8 @@ cd web && npm install && npm run build && cd ..
 ## Kurulum (VPS / Docker)
 
 ```bash
-git clone https://github.com/<KULLANICI>/<REPO>.git phone-trader
-cd phone-trader
+git clone https://github.com/<KULLANICI>/<REPO>.git sinyalci
+cd sinyalci
 docker compose up -d --build
 ```
 

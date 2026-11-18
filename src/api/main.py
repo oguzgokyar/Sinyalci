@@ -32,7 +32,7 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
         finally:
             scheduler.stop()
 
-    app = FastAPI(title="Phone Trader Admin", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Sinyalci Admin", version="0.1.0", lifespan=lifespan)
     app.state.db = db
     app.state.ws = ws_hub
     app.state.hub = agent_hub

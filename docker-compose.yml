@@ -1,7 +1,7 @@
 services:
-  treader:
+  sinyalci:
     build: .
-    container_name: treader-vps
+    container_name: sinyalci-vps
     restart: unless-stopped
     environment:
       - TRADER_ENV=vps

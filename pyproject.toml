@@ -1,7 +1,7 @@
 [project]
-name = "phone-trader"
+name = "sinyalci"
 version = "0.1.0"
-description = "Phone Trader — Zero-Trace Hardware & 4.5G MetaTrader Mobile Execution Engine"
+description = "Sinyalci — Zero-Trace Hardware & 4.5G MetaTrader Mobile Execution Engine"
 requires-python = ">=3.11"
 dependencies = [
     "pyusb>=1.2.1",
