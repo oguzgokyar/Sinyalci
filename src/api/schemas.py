@@ -136,3 +136,15 @@ class SystemStateOut(BaseModel):
     total_devices: int
     today_orders: int
     pending_orders: int
+    env_mode: str = "local"
+    is_docker: bool = False
+    connected_agents: int = 0
+
+
+class SettingsUpdate(BaseModel):
+    env_mode_override: Optional[Literal["auto", "local", "vps"]] = None
+    agent_token: Optional[str] = None
+    vps_public_url: Optional[str] = None
+    github_repo_url: Optional[str] = None
+    github_branch: Optional[str] = None
+    github_token: Optional[str] = None

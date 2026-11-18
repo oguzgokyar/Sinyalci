@@ -99,6 +99,12 @@ class Database:
                 "kill_switch": "0",
                 "dry_run": "1",
                 "webhook_secret": secrets.token_hex(16),
+                "agent_token": secrets.token_hex(20),
+                "env_mode_override": "auto",
+                "github_repo_url": "",
+                "github_branch": "master",
+                "github_token": "",
+                "vps_public_url": "",
             }
             for k, v in defaults.items():
                 conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))

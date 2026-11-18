@@ -1,0 +1,14 @@
+services:
+  treader:
+    build: .
+    container_name: treader-vps
+    restart: unless-stopped
+    environment:
+      - TRADER_ENV=vps
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./profiles:/app/profiles
+      - ./captures:/app/captures
+      - ./.git:/app/.git

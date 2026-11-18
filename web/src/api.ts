@@ -1,4 +1,15 @@
-import type { Account, AuditLog, Device, Order, ScanItem, SystemState } from "./types";
+import type {
+  Account,
+  AuditLog,
+  Device,
+  EnvironmentInfo,
+  GitHubCheckResult,
+  GitHubInfo,
+  GitHubPullResult,
+  Order,
+  ScanItem,
+  SystemState,
+} from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -17,6 +28,18 @@ export const api = {
   setKillSwitch: (active: boolean) => req<SystemState>(`/api/system/kill-switch?active=${active}`, { method: "POST" }),
   setDryRun: (active: boolean) => req<SystemState>(`/api/system/dry-run?active=${active}`, { method: "POST" }),
   getLogs: () => req<AuditLog[]>("/api/logs?limit=100"),
+  getEnvironment: () => req<EnvironmentInfo>("/api/system/environment"),
+  updateSettings: (body: {
+    env_mode_override?: "auto" | "local" | "vps";
+    agent_token?: string;
+    vps_public_url?: string;
+    github_repo_url?: string;
+    github_branch?: string;
+    github_token?: string;
+  }) => req<{ ok: boolean; state: SystemState }>("/api/system/settings", { method: "POST", body: JSON.stringify(body) }),
+  getGitHubStatus: () => req<GitHubInfo>("/api/system/github"),
+  checkGitHub: () => req<GitHubCheckResult>("/api/system/github/check", { method: "POST" }),
+  pullGitHub: () => req<GitHubPullResult>("/api/system/github/pull", { method: "POST" }),
 
   getDevices: () => req<Device[]>("/api/devices"),
   scanDevices: () => req<ScanItem[]>("/api/devices/scan", { method: "POST" }),

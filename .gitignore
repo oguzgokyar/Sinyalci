@@ -13,3 +13,7 @@ tools/scrcpy/
 data/
 web/node_modules/
 web/dist/
+.hermes/
+Obsidian Hafıza/
+*.log
+.env

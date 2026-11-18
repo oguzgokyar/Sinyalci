@@ -5,8 +5,9 @@ import Overview from "./pages/Overview";
 import Devices from "./pages/Devices";
 import Orders from "./pages/Orders";
 import Logs from "./pages/Logs";
+import Settings from "./pages/Settings";
 
-type Page = "overview" | "devices" | "orders" | "logs";
+type Page = "overview" | "devices" | "orders" | "logs" | "settings";
 
 export default function App() {
   const [page, setPage] = useState<Page>("overview");
@@ -47,13 +48,22 @@ export default function App() {
       {/* Top Header / Master Bar */}
       <header className="h-14 border-b border-zinc-800/80 px-6 flex items-center justify-between bg-zinc-950/60 backdrop-blur sticky top-0 z-50">
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
             <span className="font-bold tracking-wider text-sm mono">TREADER</span>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-bold mono border ${
+                state?.env_mode === "vps"
+                  ? "bg-sky-500/15 border-sky-500/40 text-sky-400"
+                  : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
+              }`}
+            >
+              {state?.env_mode === "vps" ? "VPS (BULUT)" : "LOKAL (PC)"}
+            </span>
           </div>
 
           <nav className="flex items-center gap-1 text-xs">
-            {(["overview", "devices", "orders", "logs"] as Page[]).map((p) => (
+            {(["overview", "devices", "orders", "logs", "settings"] as Page[]).map((p) => (
               <button
                 key={p}
                 onClick={() => setPage(p)}
@@ -69,7 +79,9 @@ export default function App() {
                   ? "Cihazlar"
                   : p === "orders"
                   ? "Emirler"
-                  : "Kayıtlar"}
+                  : p === "logs"
+                  ? "Kayıtlar"
+                  : "Ayarlar"}
               </button>
             ))}
           </nav>
@@ -109,6 +121,7 @@ export default function App() {
         {page === "devices" && <Devices />}
         {page === "orders" && <Orders state={state} />}
         {page === "logs" && <Logs state={state} />}
+        {page === "settings" && <Settings onStateChange={setState} />}
       </main>
     </div>
   );

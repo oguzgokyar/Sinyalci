@@ -7,6 +7,74 @@ export interface SystemState {
   total_devices: number;
   today_orders: number;
   pending_orders: number;
+  env_mode?: string;
+  is_docker?: boolean;
+  connected_agents?: number;
+}
+
+export interface ChecklistItem {
+  key: string;
+  title: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface EnvironmentInfo {
+  env: {
+    mode: "local" | "vps";
+    is_docker: boolean;
+    os: string;
+    python_version: string;
+    hostname: string;
+  };
+  env_mode_override: string;
+  checklist: ChecklistItem[];
+  agent_token: string;
+  vps_public_url: string;
+  agents: Array<{
+    device_id: string;
+    ip: string;
+    model: string;
+    battery: number | null;
+    connected_at: string;
+    last_seen: string;
+    online: boolean;
+  }>;
+}
+
+export interface GitHubInfo {
+  repo_url: string;
+  branch: string;
+  has_token: boolean;
+  local_git: {
+    commit_sha: string;
+    short_sha: string;
+    branch: string;
+    commit_message: string;
+    commit_date: string;
+    remote_url: string;
+  };
+}
+
+export interface GitHubCheckResult {
+  ok: boolean;
+  has_update: boolean;
+  local_sha?: string;
+  local_short_sha?: string;
+  remote_sha?: string;
+  remote_short_sha?: string;
+  remote_message?: string;
+  remote_author?: string;
+  remote_date?: string;
+  error?: string | null;
+}
+
+export interface GitHubPullResult {
+  updated: boolean;
+  previous_sha: string;
+  current_sha: string;
+  output: string;
+  restart_required: boolean;
 }
 
 export interface Device {
