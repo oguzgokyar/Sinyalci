@@ -102,12 +102,18 @@ export default function Devices() {
                 <span className="mono text-zinc-300">
                   {it.vendor} ({it.usb_vid}:{it.usb_pid}) {it.serial ? `[${it.serial}]` : ""}
                 </span>
-                <button
-                  onClick={() => handleAdd(it)}
-                  className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-zinc-950 font-semibold rounded text-[11px]"
-                >
-                  Sisteme Ekle
-                </button>
+                {it.registered ? (
+                  <span className="text-[11px] text-emerald-400 font-medium px-2 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/20">
+                    ✓ Envanterde Kayıtlı
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleAdd(it)}
+                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-zinc-950 font-semibold rounded text-[11px]"
+                  >
+                    Sisteme Ekle
+                  </button>
+                )}
               </div>
             ))}
           </div>

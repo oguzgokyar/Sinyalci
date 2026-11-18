@@ -8,7 +8,9 @@ _NUM_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 
 
 def parse_numeric_text(text: str) -> Optional[float]:
-    match = _NUM_RE.search(text.strip())
+    # Collapse spaces between digits (e.g. "46 250.00" -> "46250.00")
+    cleaned = re.sub(r"(?<=\d)\s+(?=\d)", "", text.strip())
+    match = _NUM_RE.search(cleaned)
     if not match:
         return None
     return float(match.group(0).replace(",", "."))

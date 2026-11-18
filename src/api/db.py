@@ -129,14 +129,32 @@ class Database:
 
     def create_device(self, data: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()
+        serial = data.get("serial")
+        vid = data.get("usb_vid", "04e8").lower()
+        pid = data.get("usb_pid", "6860").lower()
         with self._connect() as conn:
+            existing = None
+            if serial:
+                existing = conn.execute("SELECT * FROM devices WHERE serial = ?", (serial,)).fetchone()
+            if existing is None:
+                existing = conn.execute(
+                    "SELECT * FROM devices WHERE lower(usb_vid) = ? AND lower(usb_pid) = ?",
+                    (vid, pid),
+                ).fetchone()
+            if existing is not None:
+                conn.execute(
+                    "UPDATE devices SET serial = COALESCE(?, serial), status = 'ready' WHERE id = ?",
+                    (serial, existing["id"]),
+                )
+                return dict(conn.execute("SELECT * FROM devices WHERE id = ?", (existing["id"],)).fetchone())
+
             cur = conn.execute(
-                """INSERT INTO devices (name, serial, usb_vid, usb_pid, screen_width, screen_height, profile_path, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO devices (name, serial, usb_vid, usb_pid, screen_width, screen_height, profile_path, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?)""",
                 (
-                    data["name"], data.get("serial"), data.get("usb_vid", "04e8"),
-                    data.get("usb_pid", "6860"), data.get("screen_width", 720),
-                    data.get("screen_height", 1560), data.get("profile_path", "profiles/galaxy_a11_mt5.json"), now,
+                    data["name"], serial, vid, pid,
+                    data.get("screen_width", 720), data.get("screen_height", 1560),
+                    data.get("profile_path", "profiles/galaxy_a11_mt5.json"), now,
                 ),
             )
             return dict(conn.execute("SELECT * FROM devices WHERE id = ?", (cur.lastrowid,)).fetchone())

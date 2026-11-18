@@ -34,6 +34,16 @@ async def update_account(request: Request, account_id: int, body: AccountUpdate)
     return acc
 
 
+@router.post("/{account_id}/sync-balance", response_model=AccountOut)
+async def sync_account_balance(request: Request, account_id: int):
+    try:
+        acc = request.app.state.dm.sync_balance(account_id)
+        await request.app.state.ws.broadcast("accounts_changed", request.app.state.db.list_accounts())
+        return acc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.delete("/{account_id}")
 async def delete_account(request: Request, account_id: int):
     db = request.app.state.db

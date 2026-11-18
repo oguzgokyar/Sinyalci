@@ -23,11 +23,12 @@ export const api = {
   addDevice: (body: { name: string; serial?: string | null; usb_vid: string; usb_pid: string }) =>
     req<Device>("/api/devices", { method: "POST", body: JSON.stringify(body) }),
   deleteDevice: (id: number) => req<{ deleted: boolean }>(`/api/devices/${id}`, { method: "DELETE" }),
-  testAoa: (id: number) => req<{ status: string; aoa_version: number }>(`/api/devices/${id}/test-aoa`, { method: "POST" }),
+  testAoa: (id: number) => req<{ status: string; mode?: string; aoa_version: number }>(`/api/devices/${id}/test-aoa`, { method: "POST" }),
   calibrate: (id: number, key: string, x: number, y: number) =>
     req(`/api/devices/${id}/calibrate`, { method: "POST", body: JSON.stringify({ key, x, y }) }),
 
   getAccounts: () => req<Account[]>("/api/accounts"),
+  syncBalance: (id: number) => req<Account>(`/api/accounts/${id}/sync-balance`, { method: "POST" }),
   addAccount: (body: {
     device_id: number;
     label: string;

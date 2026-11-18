@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { Account, Device, Order } from "../types";
+import type { Account, Device, Order, SystemState } from "../types";
 
-export default function Orders() {
+export default function Orders({ state }: { state: SystemState | null }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -42,7 +42,7 @@ export default function Orders() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [state?.today_orders, state?.pending_orders, state?.dry_run]);
 
   const toggleAccountSelect = (id: number) => {
     setSelectedAccounts((prev) =>
@@ -205,7 +205,15 @@ export default function Orders() {
         </div>
 
         <div className="flex items-center justify-between pt-2">
-          <div className="text-xs text-amber-400 mono">{msg}</div>
+          <div className="text-xs mono">
+            {msg ? (
+              <span className="text-amber-400">{msg}</span>
+            ) : state?.dry_run ? (
+              <span className="text-amber-400/90">Simülasyon (DRY-RUN) açık — telefona fiziksel dokunma için sağ üstten DRY-RUN'ı kapatın.</span>
+            ) : (
+              <span className="text-emerald-400">Canlı fiziksel icra aktif (DRY-RUN OFF)</span>
+            )}
+          </div>
           <button
             type="submit"
             className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs rounded transition"

@@ -32,6 +32,7 @@ export interface ScanItem {
   adb_status: string;
   aoa_status: string;
   battery: number | null;
+  registered: boolean;
 }
 
 export interface Account {

@@ -6,12 +6,28 @@ export default function Overview({ state }: { state: SystemState | null }) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [syncMsg, setSyncMsg] = useState<string>("");
 
-  useEffect(() => {
+  const reload = () => {
     api.getDevices().then(setDevices).catch(() => {});
     api.getAccounts().then(setAccounts).catch(() => {});
     api.getOrders().then(setOrders).catch(() => {});
-  }, []);
+  };
+
+  useEffect(() => {
+    reload();
+  }, [state?.total_balance, state?.today_orders, state?.pending_orders]);
+
+  const handleSyncBalance = async (id: number) => {
+    setSyncMsg("Bakiye ekrandan okunuyor...");
+    try {
+      const updated = await api.syncBalance(id);
+      setSyncMsg(`Güncellendi: $${updated.balance.toFixed(2)}`);
+      reload();
+    } catch (err: unknown) {
+      setSyncMsg(`Hata: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -41,8 +57,9 @@ export default function Overview({ state }: { state: SystemState | null }) {
 
       {/* Accounts List */}
       <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-800 text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-          Bağlı MT5 Hesapları
+        <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Bağlı MT5 Hesapları</span>
+          {syncMsg && <span className="text-xs mono text-cyan-400">{syncMsg}</span>}
         </div>
         <table className="w-full text-left text-sm">
           <thead className="bg-zinc-900/80 text-zinc-500 text-xs border-b border-zinc-800">
@@ -88,7 +105,13 @@ export default function Overview({ state }: { state: SystemState | null }) {
                     Max {a.max_lot} Lot • Günde {a.daily_max_orders}
                   </td>
                   <td className="px-4 py-3 text-xs mono text-zinc-400">{a.today_orders}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right flex items-center justify-end gap-3">
+                    <button
+                      onClick={() => handleSyncBalance(a.id)}
+                      className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-200 rounded"
+                    >
+                      Bakiye Tara
+                    </button>
                     <span
                       className={`inline-block w-2 h-2 rounded-full ${
                         a.enabled ? "bg-emerald-500 ring-4 ring-emerald-500/20" : "bg-zinc-600"

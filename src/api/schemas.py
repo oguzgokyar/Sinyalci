@@ -30,6 +30,7 @@ class DeviceScanItem(BaseModel):
     adb_status: str = "none"
     aoa_status: str = "none"
     battery: Optional[int] = None
+    registered: bool = False
 
 
 class AccountCreate(BaseModel):
