@@ -14,7 +14,7 @@ TOUCHSCREEN_HID_ID = 1
 KEYBOARD_HID_ID = 2
 HID_LOGICAL_MAX = 10000
 
-# Single-finger Absolute Touchscreen Digitizer (0..10000 X/Y)
+# Multi-touch Screen Descriptor (Android hid-multitouch direct screen compatible)
 TOUCHSCREEN_REPORT_DESCRIPTOR = bytes([
     0x05, 0x0D,        # USAGE_PAGE (Digitizer)
     0x09, 0x04,        # USAGE (Touch Screen)
@@ -27,22 +27,30 @@ TOUCHSCREEN_REPORT_DESCRIPTOR = bytes([
     0x75, 0x01,        #     REPORT_SIZE (1)
     0x95, 0x01,        #     REPORT_COUNT (1)
     0x81, 0x02,        #     INPUT (Data,Var,Abs)
-    0x95, 0x07,        #     REPORT_COUNT (7) padding
+    0x09, 0x32,        #     USAGE (In Range)
+    0x81, 0x02,        #     INPUT (Data,Var,Abs)
+    0x95, 0x06,        #     REPORT_COUNT (6) - Padding
     0x81, 0x03,        #     INPUT (Cnst,Var,Abs)
+    0x09, 0x51,        #     USAGE (Contact Identifier)
+    0x75, 0x08,        #     REPORT_SIZE (8)
+    0x95, 0x01,        #     REPORT_COUNT (1)
+    0x25, 0x7F,        #     LOGICAL_MAXIMUM (127)
+    0x81, 0x02,        #     INPUT (Data,Var,Abs)
     0x05, 0x01,        #     USAGE_PAGE (Generic Desktop)
-    0x09, 0x30,        #     USAGE (X)
-    0x15, 0x00,        #     LOGICAL_MINIMUM (0)
     0x26, 0x10, 0x27,  #     LOGICAL_MAXIMUM (10000)
     0x75, 0x10,        #     REPORT_SIZE (16)
-    0x95, 0x01,        #     REPORT_COUNT (1)
+    0x09, 0x30,        #     USAGE (X)
     0x81, 0x02,        #     INPUT (Data,Var,Abs)
     0x09, 0x31,        #     USAGE (Y)
-    0x15, 0x00,        #     LOGICAL_MINIMUM (0)
-    0x26, 0x10, 0x27,  #     LOGICAL_MAXIMUM (10000)
-    0x75, 0x10,        #     REPORT_SIZE (16)
-    0x95, 0x01,        #     REPORT_COUNT (1)
     0x81, 0x02,        #     INPUT (Data,Var,Abs)
     0xC0,              #   END_COLLECTION
+    0x05, 0x0D,        #   USAGE_PAGE (Digitizer)
+    0x09, 0x54,        #   USAGE (Contact Count)
+    0x15, 0x00,        #   LOGICAL_MINIMUM (0)
+    0x25, 0x7F,        #   LOGICAL_MAXIMUM (127)
+    0x75, 0x08,        #   REPORT_SIZE (8)
+    0x95, 0x01,        #   REPORT_COUNT (1)
+    0x81, 0x02,        #   INPUT (Data,Var,Abs)
     0xC0,              # END_COLLECTION
 ])
 
@@ -78,11 +86,27 @@ def pixel_to_hid_coord(pixel: int, axis_max_px: int) -> int:
     return max(0, min(HID_LOGICAL_MAX, scaled))
 
 
-def build_touch_report(x: int, y: int, pressed: bool) -> bytes:
-    tip = 0x01 if pressed else 0x00
+def build_touch_report(
+    x: int,
+    y: int,
+    pressed: bool,
+    contact_id: int = 0,
+    contact_count: Optional[int] = None,
+) -> bytes:
+    """Builds a 7-byte multi-touch report for absolute coordinates 0..10000."""
+    status = 0x03 if pressed else 0x00  # Tip Switch (bit 0) + In Range (bit 1)
     xc = max(0, min(HID_LOGICAL_MAX, x))
     yc = max(0, min(HID_LOGICAL_MAX, y))
-    return bytes([tip, xc & 0xFF, (xc >> 8) & 0xFF, yc & 0xFF, (yc >> 8) & 0xFF])
+    count = (1 if pressed else 0) if contact_count is None else contact_count
+    return bytes([
+        status,
+        contact_id & 0x7F,
+        xc & 0xFF,
+        (xc >> 8) & 0xFF,
+        yc & 0xFF,
+        (yc >> 8) & 0xFF,
+        count & 0x7F,
+    ])
 
 
 def build_key_report(char: Optional[str]) -> bytes:

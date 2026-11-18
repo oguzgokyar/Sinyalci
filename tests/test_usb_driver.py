@@ -50,10 +50,12 @@ def test_driver_tap_and_type_emit_hid_events():
 
     driver.tap(540, 1200, dwell_ms=100)
     touch_calls = [c for c in dev.ctrl_transfer.call_args_list if c.args[1] == AOA_SEND_HID_EVENT]
-    assert len(touch_calls) == 2
+    assert len(touch_calls) == 3  # press + release(count=1) + idle(count=0)
     assert touch_calls[0].args[2] == TOUCHSCREEN_HID_ID
-    assert touch_calls[0].args[4][0] == 0x01
+    assert touch_calls[0].args[4][0] == 0x03
     assert touch_calls[1].args[4][0] == 0x00
+    assert touch_calls[1].args[4][6] == 1
+    assert touch_calls[2].args[4][6] == 0
 
     dev.ctrl_transfer.reset_mock()
     driver.type_text("0.1")

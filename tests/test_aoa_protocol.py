@@ -35,11 +35,11 @@ def test_pixel_to_hid_coord_scaling_and_clamping():
 
 
 def test_build_touch_report_little_endian_encoding():
-    # x=5000 (0x1388), y=2500 (0x09C4)
+    # x=5000 (0x1388), y=2500 (0x09C4), 7-byte multi-touch report
     down = build_touch_report(5000, 2500, pressed=True)
     up = build_touch_report(5000, 2500, pressed=False)
-    assert down == bytes([0x01, 0x88, 0x13, 0xC4, 0x09])
-    assert up == bytes([0x00, 0x88, 0x13, 0xC4, 0x09])
+    assert down == bytes([0x03, 0x00, 0x88, 0x13, 0xC4, 0x09, 0x01])
+    assert up == bytes([0x00, 0x00, 0x88, 0x13, 0xC4, 0x09, 0x00])
 
 
 def test_build_key_report_digits_and_dot():

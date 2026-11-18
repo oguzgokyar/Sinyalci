@@ -103,9 +103,11 @@ class AOAUSBDriver:
     def tap(self, x_px: int, y_px: int, dwell_ms: int = 100) -> None:
         hx = pixel_to_hid_coord(x_px, self.screen_width)
         hy = pixel_to_hid_coord(y_px, self.screen_height)
-        self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(hx, hy, pressed=True))
+        self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(hx, hy, pressed=True, contact_count=1))
         self._sleep(dwell_ms / 1000.0)
-        self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(hx, hy, pressed=False))
+        self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(hx, hy, pressed=False, contact_count=1))
+        self._sleep(0.01)
+        self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(hx, hy, pressed=False, contact_count=0))
 
     def swipe_path(self, points: Iterable[tuple[int, int]], step_delay_ms: float = 12.0) -> None:
         pts = list(points)
@@ -114,17 +116,14 @@ class AOAUSBDriver:
         for x_px, y_px in pts:
             hx = pixel_to_hid_coord(x_px, self.screen_width)
             hy = pixel_to_hid_coord(y_px, self.screen_height)
-            self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(hx, hy, pressed=True))
+            self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(hx, hy, pressed=True, contact_count=1))
             self._sleep(step_delay_ms / 1000.0)
         last_x, last_y = pts[-1]
-        self._send_hid(
-            TOUCHSCREEN_HID_ID,
-            build_touch_report(
-                pixel_to_hid_coord(last_x, self.screen_width),
-                pixel_to_hid_coord(last_y, self.screen_height),
-                pressed=False,
-            ),
-        )
+        lx = pixel_to_hid_coord(last_x, self.screen_width)
+        ly = pixel_to_hid_coord(last_y, self.screen_height)
+        self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(lx, ly, pressed=False, contact_count=1))
+        self._sleep(0.01)
+        self._send_hid(TOUCHSCREEN_HID_ID, build_touch_report(lx, ly, pressed=False, contact_count=0))
 
     def type_text(self, text: str, key_delay_ms: float = 65.0) -> None:
         for ch in text:
