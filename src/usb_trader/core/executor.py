@@ -71,9 +71,15 @@ class TradeExecutor:
         if state != MTState.ORDER_FORM:
             raise ExecutionAbortedError(f"Expected ORDER_FORM, observed {state.value}")
 
-        # 2. Enter lot size via HID keyboard
-        self._human_tap(self._layout.lot_field)
-        self._driver.type_text("\b\b\b\b" + f"{signal.lot:.2f}")
+        # 2. Enter lot size only if screen lot differs from target lot
+        if not self._ocr.verify_value(frame, self._layout.lot_roi, expected=signal.lot):
+            self._human_tap(self._layout.lot_field)
+            self._sleep(0.25)
+            if hasattr(self._driver, "clear_and_type"):
+                self._driver.clear_and_type(f"{signal.lot:.2f}")
+            else:
+                self._driver.type_text("\b\b\b\b" + f"{signal.lot:.2f}")
+            self._sleep(0.35)
 
         # 3. Closed-loop OCR confirmation before pressing BUY/SELL
         verify_frame = self._frames.grab()

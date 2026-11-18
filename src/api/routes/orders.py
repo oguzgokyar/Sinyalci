@@ -3,7 +3,7 @@
 import asyncio
 import uuid
 from fastapi import APIRouter, HTTPException, Request
-from api.schemas import OrderCreate, OrderOut, WebhookSignal
+from api.schemas import OrderCreate, OrderOut, OrderUpdate, WebhookSignal
 
 router = APIRouter(prefix="/api", tags=["orders"])
 
@@ -74,6 +74,61 @@ async def list_orders(request: Request, limit: int = 100):
 @router.post("/orders", response_model=list[OrderOut])
 async def create_orders(request: Request, body: OrderCreate):
     return await _enqueue_orders(request, body)
+
+
+@router.patch("/orders/{order_id}", response_model=OrderOut)
+async def update_order(request: Request, order_id: int, body: OrderUpdate):
+    db = request.app.state.db
+    ws = request.app.state.ws
+    order = db.get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order["status"] not in ("queued", "scheduled", "failed", "cancelled"):
+        raise HTTPException(status_code=400, detail=f"Cannot edit order in state {order['status']}")
+
+    patch_data = body.model_dump(exclude_unset=True)
+    if "symbol" in patch_data and patch_data["symbol"]:
+        patch_data["symbol"] = patch_data["symbol"].upper()
+    if "lot" in patch_data and patch_data["lot"] is not None:
+        acc = db.get_account(order["account_id"])
+        if acc and patch_data["lot"] > acc["max_lot"]:
+            raise HTTPException(status_code=400, detail=f"Lot {patch_data['lot']} > max_lot {acc['max_lot']}")
+    if "scheduled_at" in patch_data:
+        patch_data["status"] = "scheduled" if patch_data["scheduled_at"] else "queued"
+        patch_data["error"] = None
+
+    updated = db.update_order(order_id, **patch_data)
+    db.add_log(f"Order #{order_id} updated: {updated['side']} {updated['lot']} {updated['symbol']}", device_id=order["device_id"], order_id=order_id)
+    await ws.broadcast("order_updated", updated)
+    return updated
+
+
+@router.post("/orders/{order_id}/retry", response_model=OrderOut)
+async def retry_order(request: Request, order_id: int):
+    db = request.app.state.db
+    dm = request.app.state.dm
+    ws = request.app.state.ws
+    order = db.get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order["status"] not in ("failed", "cancelled", "scheduled"):
+        raise HTTPException(status_code=400, detail=f"Cannot retry order in state {order['status']}")
+
+    updated = db.update_order(order_id, status="queued", error=None, scheduled_at=None)
+    db.add_log(f"Order #{order_id} re-queued for execution", device_id=order["device_id"], order_id=order_id)
+    await ws.broadcast("order_updated", updated)
+    asyncio.create_task(dm.execute_order_async(order_id))
+    return updated
+
+
+@router.delete("/orders/{order_id}")
+async def delete_order(request: Request, order_id: int):
+    db = request.app.state.db
+    ws = request.app.state.ws
+    if not db.delete_order(order_id):
+        raise HTTPException(status_code=404, detail="Order not found")
+    await ws.broadcast("order_updated", {"id": order_id, "deleted": True})
+    return {"deleted": True}
 
 
 @router.post("/orders/{order_id}/cancel", response_model=OrderOut)

@@ -20,8 +20,9 @@ def test_executor_runs_closed_loop_buy_order():
     frames = _make_sequence_source([dummy, dummy, dummy])
     classifier = MagicMock()
     classifier.classify.side_effect = [MTState.ORDER_FORM, MTState.ORDER_FORM, MTState.ORDER_DONE]
-    driver = MagicMock()
-    ocr = OCRVerifier(reader_fn=lambda _: "0.10")
+    driver = MagicMock(spec=["tap", "type_text"])
+    # Initial read returns 0.05 (differs from 0.10), verify read returns 0.10
+    ocr = OCRVerifier(reader_fn=MagicMock(side_effect=["0.05", "0.10"]))
     cb = CircuitBreaker()
 
     layout = OrderLayout(

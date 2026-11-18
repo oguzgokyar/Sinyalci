@@ -26,6 +26,44 @@ export default function Orders({ state }: { state: SystemState | null }) {
   const [accBal, setAccBal] = useState("46250");
   const [accMaxLot, setAccMaxLot] = useState("0.50");
 
+  // Editing order state
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [editSymbol, setEditSymbol] = useState("");
+  const [editSide, setEditSide] = useState<"BUY" | "SELL">("BUY");
+  const [editLot, setEditLot] = useState("0.01");
+  const [editSl, setEditSl] = useState("");
+  const [editTp, setEditTp] = useState("");
+  const [editScheduled, setEditScheduled] = useState("");
+
+  const startEdit = (o: Order) => {
+    setEditingOrder(o);
+    setEditSymbol(o.symbol);
+    setEditSide(o.side as "BUY" | "SELL");
+    setEditLot(String(o.lot));
+    setEditSl(o.sl !== null ? String(o.sl) : "");
+    setEditTp(o.tp !== null ? String(o.tp) : "");
+    setEditScheduled(o.scheduled_at ? o.scheduled_at.slice(0, 16) : "");
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingOrder) return;
+    try {
+      await api.updateOrder(editingOrder.id, {
+        symbol: editSymbol.trim(),
+        side: editSide,
+        lot: parseFloat(editLot),
+        sl: editSl ? parseFloat(editSl) : null,
+        tp: editTp ? parseFloat(editTp) : null,
+        scheduled_at: editScheduled ? new Date(editScheduled).toISOString() : null,
+      });
+      setEditingOrder(null);
+      load();
+    } catch (err: unknown) {
+      setMsg(`Hata: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   const load = () => {
     api.getAccounts().then((a) => {
       setAccounts(a);
@@ -273,6 +311,81 @@ export default function Orders({ state }: { state: SystemState | null }) {
         </form>
       )}
 
+      {/* Edit Order Panel */}
+      {editingOrder && (
+        <form
+          onSubmit={handleSaveEdit}
+          className="p-4 bg-zinc-900 border border-amber-500/40 rounded-lg space-y-3"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-amber-400 uppercase mono">
+              Emir #{editingOrder.id} Düzenle
+            </span>
+            <button
+              type="button"
+              onClick={() => setEditingOrder(null)}
+              className="text-xs text-zinc-400 hover:text-zinc-200"
+            >
+              Kapat
+            </button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <input
+              value={editSymbol}
+              onChange={(e) => setEditSymbol(e.target.value)}
+              placeholder="Sembol"
+              className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs mono"
+            />
+            <select
+              value={editSide}
+              onChange={(e) => setEditSide(e.target.value as "BUY" | "SELL")}
+              className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs mono"
+            >
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+            <input
+              type="number"
+              step="0.01"
+              value={editLot}
+              onChange={(e) => setEditLot(e.target.value)}
+              placeholder="Lot"
+              className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs mono"
+            />
+            <input
+              type="number"
+              step="0.00001"
+              value={editSl}
+              onChange={(e) => setEditSl(e.target.value)}
+              placeholder="SL"
+              className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs mono"
+            />
+            <input
+              type="number"
+              step="0.00001"
+              value={editTp}
+              onChange={(e) => setEditTp(e.target.value)}
+              placeholder="TP"
+              className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs mono"
+            />
+            <input
+              type="datetime-local"
+              value={editScheduled}
+              onChange={(e) => setEditScheduled(e.target.value)}
+              className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-[11px] mono"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="submit"
+              className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded"
+            >
+              Kaydet
+            </button>
+          </div>
+        </form>
+      )}
+
       {/* Orders Table */}
       <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg overflow-hidden">
         <table className="w-full text-left text-sm">
@@ -320,7 +433,23 @@ export default function Orders({ state }: { state: SystemState | null }) {
                   </span>
                   {o.error && <span className="ml-2 text-[11px] text-rose-400">{o.error}</span>}
                 </td>
-                <td className="px-4 py-2.5 text-right">
+                <td className="px-4 py-2.5 text-right space-x-2 whitespace-nowrap">
+                  {o.status !== "filled" && o.status !== "executing" && (
+                    <button
+                      onClick={() => startEdit(o)}
+                      className="text-xs text-amber-400 hover:underline"
+                    >
+                      Düzenle
+                    </button>
+                  )}
+                  {(o.status === "failed" || o.status === "cancelled" || o.status === "scheduled") && (
+                    <button
+                      onClick={() => api.retryOrder(o.id).then(load)}
+                      className="text-xs text-cyan-400 hover:underline"
+                    >
+                      Çalıştır
+                    </button>
+                  )}
                   {(o.status === "queued" || o.status === "scheduled") && (
                     <button
                       onClick={() => api.cancelOrder(o.id).then(load)}
@@ -329,6 +458,12 @@ export default function Orders({ state }: { state: SystemState | null }) {
                       İptal
                     </button>
                   )}
+                  <button
+                    onClick={() => api.deleteOrder(o.id).then(load)}
+                    className="text-xs text-zinc-500 hover:text-rose-400"
+                  >
+                    Sil
+                  </button>
                 </td>
               </tr>
             ))}

@@ -72,6 +72,15 @@ class OrderCreate(BaseModel):
     idempotency_key: Optional[str] = None
 
 
+class OrderUpdate(BaseModel):
+    symbol: Optional[str] = Field(default=None, min_length=3, max_length=24)
+    side: Optional[Literal["BUY", "SELL"]] = None
+    lot: Optional[float] = Field(default=None, gt=0.0, le=50.0)
+    sl: Optional[float] = None
+    tp: Optional[float] = None
+    scheduled_at: Optional[str] = None
+
+
 class OrderOut(BaseModel):
     id: int
     account_id: int

@@ -53,6 +53,19 @@ export const api = {
     tp?: number | null;
     scheduled_at?: string | null;
   }) => req<Order[]>("/api/orders", { method: "POST", body: JSON.stringify(body) }),
+  updateOrder: (
+    id: number,
+    body: {
+      symbol?: string;
+      side?: "BUY" | "SELL";
+      lot?: number;
+      sl?: number | null;
+      tp?: number | null;
+      scheduled_at?: string | null;
+    }
+  ) => req<Order>(`/api/orders/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  retryOrder: (id: number) => req<Order>(`/api/orders/${id}/retry`, { method: "POST" }),
+  deleteOrder: (id: number) => req<{ deleted: boolean }>(`/api/orders/${id}`, { method: "DELETE" }),
   cancelOrder: (id: number) => req<Order>(`/api/orders/${id}/cancel`, { method: "POST" }),
 };
 

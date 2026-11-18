@@ -65,3 +65,15 @@ class AdbTouchDriver:
             else:
                 self._run("input", "text", ch)
             self._sleep(key_delay_ms / 1000.0)
+
+    def clear_and_type(self, text: str, key_delay_ms: float = 45.0) -> None:
+        """Move cursor to end, clear existing digits reliably, type new text, hide keyboard."""
+        self._run("input", "keyevent", "123")  # KEYCODE_MOVE_END
+        for _ in range(10):
+            self._run("input", "keyevent", "67")  # KEYCODE_DEL
+        self._run("input", "text", text)
+        self._sleep(key_delay_ms / 1000.0)
+        self.dismiss_keyboard()
+
+    def dismiss_keyboard(self) -> None:
+        self._run("input", "keyevent", "111")  # KEYCODE_ESCAPE hides soft keyboard cleanly

@@ -179,13 +179,13 @@ class Database:
         with self._connect() as conn:
             if account_id is None:
                 row = conn.execute(
-                    "SELECT COUNT(*) AS c FROM orders WHERE created_at LIKE ? AND status != 'cancelled'",
+                    "SELECT COUNT(*) AS c FROM orders WHERE created_at LIKE ? AND status = 'filled'",
                     (f"{today}%",),
                 ).fetchone()
             else:
                 row = conn.execute(
-                    "SELECT COUNT(*) AS c FROM orders WHERE account_id = ? AND created_at LIKE ? AND status != 'cancelled'",
-                    (account_id, f"{today}%"),
+                    "SELECT COUNT(*) AS c FROM orders WHERE account_id = ? AND created_at LIKE ? AND status = 'filled'",
+                    (account_id, f"{today}%",),
                 ).fetchone()
             return int(row["c"])
 
@@ -300,6 +300,11 @@ class Database:
         with self._connect() as conn:
             conn.execute(f"UPDATE orders SET {clause} WHERE id = ?", (*fields.values(), order_id))
         return self.get_order(order_id)
+
+    def delete_order(self, order_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+            return cur.rowcount > 0
 
     # --- Audit Logs ---
     def add_log(
