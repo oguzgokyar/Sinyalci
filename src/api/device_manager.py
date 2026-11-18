@@ -122,7 +122,14 @@ class DeviceManager:
         if not dev:
             raise ValueError(f"Device {device_id} not found")
         serial = dev.get("serial")
-        src = AdbSnapshotSource(adb_path=_find_bundled_adb(), serial=serial)
+        adb_bin = _find_bundled_adb()
+        # Ensure screen is awake before grabbing frame
+        try:
+            cmd = [adb_bin] + (["-s", serial] if serial else []) + ["shell", "input", "keyevent", "224"]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        except Exception:
+            pass
+        src = AdbSnapshotSource(adb_path=adb_bin, serial=serial)
         frame = src.grab()
         captures_dir = pathlib.Path("captures")
         captures_dir.mkdir(exist_ok=True)
@@ -135,13 +142,23 @@ class DeviceManager:
         acc = self.db.get_account(account_id)
         if not acc:
             raise ValueError(f"Account {account_id} not found")
+        dev = self.db.get_device(acc["device_id"])
         frame, _ = self.capture_screen(acc["device_id"])
         ocr = OCRVerifier()
-        # Try bottom Trade tab pill badge (visible on Quotes, Charts, Trade, History)
+
+        # 1. Try bottom Trade tab pill badge (visible on Quotes, Charts, Trade, History)
         val = ocr.read_number(frame, (295, 1380, 425, 1425))
-        if val is None:
-            # Fallback: Trade tab "Bakiye:" row
+        if val is None and dev and dev.get("serial"):
+            # Possibly on New Order screen (no bottom tab bar) -> press Back and open Trade tab
+            drv, _ = self._get_touch_driver(dev)
+            drv.tap(40, 120, dwell_ms=75)
+            time.sleep(0.8)
+            drv.tap(360, 1395, dwell_ms=80)
+            time.sleep(0.8)
+            frame, _ = self.capture_screen(acc["device_id"])
             val = ocr.read_number(frame, (550, 192, 705, 232))
+            if val is None:
+                val = ocr.read_number(frame, (295, 1380, 425, 1425))
         if val is None:
             raise RuntimeError("MT5 ekranından bakiye okunamadı (MT5 açık olmalı).")
         updated = self.db.update_account(account_id, {"balance": val})
