@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from api.agent_hub import AgentHub
 from api.db import Database
 from api.device_manager import DeviceManager
-from api.routes import accounts, devices, orders, system
+from api.routes import accounts, devices, orders, system, strategy
 from api.scheduler import OrderScheduler
 from api.ws import EventHub
 
@@ -51,6 +51,7 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
     app.include_router(devices.router)
     app.include_router(accounts.router)
     app.include_router(orders.router)
+    app.include_router(strategy.router)
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):

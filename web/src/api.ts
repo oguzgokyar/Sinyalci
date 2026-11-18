@@ -1,6 +1,7 @@
 import type {
   Account,
   AuditLog,
+  ChecklistItem,
   Device,
   EnvironmentInfo,
   GitHubCheckResult,
@@ -9,6 +10,9 @@ import type {
   Order,
   ScanItem,
   SystemState,
+  StrategyConfig,
+  StrategySignal,
+  SignalStats,
 } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -90,6 +94,21 @@ export const api = {
   retryOrder: (id: number) => req<Order>(`/api/orders/${id}/retry`, { method: "POST" }),
   deleteOrder: (id: number) => req<{ deleted: boolean }>(`/api/orders/${id}`, { method: "DELETE" }),
   cancelOrder: (id: number) => req<Order>(`/api/orders/${id}/cancel`, { method: "POST" }),
+
+  // Strategy & Signals
+  getStrategyConfig: () => req<StrategyConfig>("/api/strategy/config"),
+  updateStrategyConfig: (body: Partial<StrategyConfig>) =>
+    req<StrategyConfig>("/api/strategy/config", { method: "POST", body: JSON.stringify(body) }),
+  getSignals: () => req<{ signals: StrategySignal[]; stats: SignalStats }>("/api/strategy/signals"),
+  scanTicker: (ticker: string, date?: string) =>
+    req<{ status: string; ticker: string; message: string }>("/api/strategy/scan", {
+      method: "POST",
+      body: JSON.stringify({ ticker, date }),
+    }),
+  executeSignal: (id: number) =>
+    req<{ status: string; order: Order }>(`/api/strategy/signals/${id}/execute`, { method: "POST" }),
+  rejectSignal: (id: number) =>
+    req<{ status: string; signal_id: number }>(`/api/strategy/signals/${id}/reject`, { method: "POST" }),
 };
 
 export function connectWS(onEvent: (event: string, data: unknown) => void): () => void {

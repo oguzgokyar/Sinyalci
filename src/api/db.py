@@ -76,6 +76,24 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     message TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    broker_symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    sl REAL NOT NULL,
+    tp REAL NOT NULL,
+    risk_reward REAL NOT NULL,
+    calculated_lot REAL NOT NULL,
+    risk_amount REAL NOT NULL,
+    confidence INTEGER NOT NULL DEFAULT 80,
+    status TEXT NOT NULL DEFAULT 'pending', -- pending, executed, rejected, expired
+    reasoning TEXT,
+    order_id INTEGER REFERENCES orders(id),
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -105,6 +123,13 @@ class Database:
                 "github_branch": "master",
                 "github_token": "",
                 "vps_public_url": "",
+                "strategy_balance": "46250.0",
+                "strategy_risk_percent": "1.0",
+                "strategy_min_rr": "2.0",
+                "strategy_symbol_suffix": ".us",
+                "strategy_auto_execute": "0",
+                "strategy_watchlist": "NVDA,AAPL,MSFT,TSLA,AMZN,META,GOOGL,AMD",
+                "strategy_max_daily_loss": "925.0",
             }
             for k, v in defaults.items():
                 conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
@@ -312,7 +337,56 @@ class Database:
             cur = conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
             return cur.rowcount > 0
 
-    # --- Audit Logs ---
+    # --- Signals ---
+    def create_signal(self, data: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO signals (ticker, broker_symbol, side, entry_price, sl, tp, risk_reward, calculated_lot, risk_amount, confidence, status, reasoning, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    data["ticker"].upper(),
+                    data.get("broker_symbol", data["ticker"]).upper(),
+                    data["side"].upper(),
+                    float(data["entry_price"]),
+                    float(data["sl"]),
+                    float(data["tp"]),
+                    float(data.get("risk_reward", 2.0)),
+                    float(data.get("calculated_lot", 0.1)),
+                    float(data.get("risk_amount", 462.5)),
+                    int(data.get("confidence", 80)),
+                    data.get("status", "pending"),
+                    data.get("reasoning", ""),
+                    now,
+                ),
+            )
+            return dict(conn.execute("SELECT * FROM signals WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+    def list_signals(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM signals ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_signal(self, signal_id: int) -> Optional[dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
+            return dict(row) if row else None
+
+    def update_signal_status(self, signal_id: int, status: str, order_id: Optional[int] = None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE signals SET status = ?, order_id = COALESCE(?, order_id) WHERE id = ?",
+                (status, order_id, signal_id),
+            )
+
+    def get_today_signal_stats(self) -> dict[str, Any]:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with self._connect() as conn:
+            total = conn.execute("SELECT COUNT(*) AS c FROM signals WHERE created_at LIKE ?", (f"{today}%",)).fetchone()["c"]
+            executed = conn.execute("SELECT COUNT(*) AS c FROM signals WHERE created_at LIKE ? AND status = 'executed'", (f"{today}%",)).fetchone()["c"]
+            pending = conn.execute("SELECT COUNT(*) AS c FROM signals WHERE created_at LIKE ? AND status = 'pending'", (f"{today}%",)).fetchone()["c"]
+            return {"total": total, "executed": executed, "pending": pending}
+
     def add_log(
         self, message: str, level: str = "INFO", device_id: Optional[int] = None, order_id: Optional[int] = None
     ) -> dict[str, Any]:

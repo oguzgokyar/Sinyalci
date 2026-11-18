@@ -147,3 +147,41 @@ export interface AuditLog {
   message: string;
   created_at: string;
 }
+
+export interface StrategyConfig {
+  balance: number;
+  risk_percent: number;
+  risk_amount: number;
+  min_rr: number;
+  target_profit: number;
+  symbol_suffix: string;
+  auto_execute: boolean;
+  watchlist: string[];
+  max_daily_loss: number;
+  tradingagents_url: string;
+}
+
+export interface StrategySignal {
+  id: number;
+  ticker: string;
+  broker_symbol: string;
+  side: "BUY" | "SELL" | "HOLD";
+  entry_price: number;
+  sl: number;
+  tp: number;
+  risk_reward: number;
+  calculated_lot: number;
+  risk_amount: number;
+  confidence: number;
+  status: "pending" | "executed" | "rejected" | "expired";
+  reasoning: string;
+  order_id: number | null;
+  created_at: string;
+}
+
+export interface SignalStats {
+  total: number;
+  executed: number;
+  pending: number;
+}
+

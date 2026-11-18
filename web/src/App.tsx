@@ -6,8 +6,9 @@ import Devices from "./pages/Devices";
 import Orders from "./pages/Orders";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
+import Strategy from "./pages/Strategy";
 
-type Page = "overview" | "devices" | "orders" | "logs" | "settings";
+type Page = "overview" | "strategy" | "devices" | "orders" | "logs" | "settings";
 
 export default function App() {
   const [page, setPage] = useState<Page>("overview");
@@ -63,7 +64,7 @@ export default function App() {
           </div>
 
           <nav className="flex items-center gap-1 text-xs">
-            {(["overview", "devices", "orders", "logs", "settings"] as Page[]).map((p) => (
+            {(["overview", "strategy", "devices", "orders", "logs", "settings"] as Page[]).map((p) => (
               <button
                 key={p}
                 onClick={() => setPage(p)}
@@ -75,6 +76,8 @@ export default function App() {
               >
                 {p === "overview"
                   ? "Genel Bakış"
+                  : p === "strategy"
+                  ? "🎯 Strateji & Sinyaller"
                   : p === "devices"
                   ? "Cihazlar"
                   : p === "orders"
@@ -118,6 +121,7 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 p-6 max-w-7xl w-full mx-auto">
         {page === "overview" && <Overview state={state} />}
+        {page === "strategy" && <Strategy />}
         {page === "devices" && <Devices />}
         {page === "orders" && <Orders state={state} />}
         {page === "logs" && <Logs state={state} />}
