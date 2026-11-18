@@ -51,6 +51,14 @@
     "balance_row_y": 211,
     "equity_row_y": 260,
     "free_margin_row_y": 310,
-    "positions_start_y": 348
+    "positions_start_y": 348,
+    "first_position_row": [150, 532],
+    "context_close_position": [132, 1058],
+    "close_confirm_button": [360, 1434]
+  },
+  "system": {
+    "mt5_package": "net.metaquotes.metatrader5",
+    "unlock_swipe_start": [360, 1200],
+    "unlock_swipe_end": [360, 400]
   }
 }
