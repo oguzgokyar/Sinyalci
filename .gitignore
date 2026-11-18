@@ -8,3 +8,5 @@ build/
 captures/
 logs/
 tools/*.exe
+tools/*.zip
+tools/scrcpy/
