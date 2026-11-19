@@ -303,30 +303,52 @@ class StrategyEngine:
         elif "FINAL TRANSACTION PROPOSAL: **HOLD**" in content or "**Action**: Hold" in content:
             side = "HOLD"
 
-        # Regex extract Entry / SL
+        # Fetch real-time market price to anchor execution
+        live_chart = self.fetch_live_chart(ticker)
+        current_market_price = float(live_chart["price"]) if live_chart and live_chart["price"] > 0 else None
+
+        # Regex extract AI theoretical Entry / SL
         entry_match = re.search(r"\*\*Entry Price\*\*:\s*([0-9.]+)", content)
         sl_match = re.search(r"\*\*Stop Loss\*\*:\s*([0-9.]+)", content)
         reason_match = re.search(r"\*\*Reasoning\*\*:\s*([^\n]+)", content)
+        close_match = re.search(r"\*\*Close Price\*\*\s*\|\s*\*?\$?([0-9.]+)", content)
 
-        # Fallback to current close price if entry not found
-        close_match = re.search(r"\*\*Close Price\*\*\s*\|\s*\*\*?\$?([0-9.]+)", content)
+        raw_ai_entry = float(entry_match.group(1)) if entry_match else None
+        raw_ai_sl = float(sl_match.group(1)) if sl_match else None
 
-        entry_price = float(entry_match.group(1)) if entry_match else (float(close_match.group(1)) if close_match else 100.0)
-        
+        # ANCHOR: Entry price MUST be the real live market price when executing
+        if current_market_price and current_market_price > 0:
+            entry_price = current_market_price
+        elif raw_ai_entry:
+            entry_price = raw_ai_entry
+        elif close_match:
+            entry_price = float(close_match.group(1))
+        else:
+            entry_price = 100.0
+
         cfg = self.get_config()
         min_rr = cfg["min_rr"]
 
-        if sl_match:
-            sl = float(sl_match.group(1))
+        # Calculate reasonable stop distance based on real market price
+        if raw_ai_entry and raw_ai_sl and abs(raw_ai_entry - raw_ai_sl) > 0:
+            sl_distance = abs(raw_ai_entry - raw_ai_sl)
+            # Guard against absurdly wide stops (max 2% of price for Forex/Gold)
+            if sl_distance > entry_price * 0.02:
+                sl_distance = round(entry_price * 0.008, 2 if "JPY" in ticker or entry_price > 10 else 4)
         else:
-            # 2% default fallback stop
-            sl = round(entry_price * 0.98 if side == "BUY" else entry_price * 1.02, 2)
+            sl_distance = round(entry_price * 0.008, 2 if "JPY" in ticker or entry_price > 10 else 4)
 
-        sl_distance = abs(entry_price - sl)
+        if sl_distance <= 0:
+            sl_distance = round(entry_price * 0.005, 4)
+
+        is_high_precision = entry_price < 10 and "JPY" not in ticker
+
         if side == "BUY":
-            tp = round(entry_price + (sl_distance * min_rr), 2)
+            sl = round(entry_price - sl_distance, 4 if is_high_precision else 2)
+            tp = round(entry_price + (sl_distance * min_rr), 4 if is_high_precision else 2)
         else:
-            tp = round(entry_price - (sl_distance * min_rr), 4)
+            sl = round(entry_price + sl_distance, 4 if is_high_precision else 2)
+            tp = round(entry_price - (sl_distance * min_rr), 4 if is_high_precision else 2)
 
         calculated_lot, risk_amount = self.calculate_lot(ticker, entry_price, sl)
         broker_symbol = self.format_broker_symbol(ticker)
@@ -502,12 +524,13 @@ class StrategyEngine:
             lot = float(pos["lot"])
             side = pos["side"]
 
-            # Calculate live floating PnL
+            # Calculate live floating PnL with clean symbol without suffixes
+            clean_sym = sym.replace(".PRO", "").replace(".pro", "").replace(".RAW", "").replace(".raw", "").replace("#", "").strip().upper()
             diff = (current_price - entry) if side == "BUY" else (entry - current_price)
-            if "XAUUSD" in sym or "GOLD" in sym:
+            if "XAUUSD" in clean_sym or "GOLD" in clean_sym:
                 pnl = diff * 100.0 * lot
-            elif any(sym.startswith(p) or sym.endswith(p) for p in ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]):
-                pip_size = 0.01 if "JPY" in sym else 0.0001
+            elif any(clean_sym.startswith(p) or clean_sym.endswith(p) for p in ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]):
+                pip_size = 0.01 if "JPY" in clean_sym else 0.0001
                 pips = diff / pip_size
                 pnl = pips * 10.0 * lot
             else:

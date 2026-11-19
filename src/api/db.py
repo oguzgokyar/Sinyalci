@@ -423,12 +423,13 @@ class Database:
             side = pos["side"]
             symbol = pos["symbol"]
 
-            # Calculate PnL
+            # Calculate PnL with clean symbol without suffixes
+            clean_sym = symbol.replace(".PRO", "").replace(".pro", "").replace(".RAW", "").replace(".raw", "").replace("#", "").strip().upper()
             diff = (close_price - entry) if side == "BUY" else (entry - close_price)
-            if "XAUUSD" in symbol or "GOLD" in symbol:
+            if "XAUUSD" in clean_sym or "GOLD" in clean_sym:
                 pnl = diff * 100.0 * lot
-            elif any(symbol.startswith(p) or symbol.endswith(p) for p in ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]):
-                pip_size = 0.01 if "JPY" in symbol else 0.0001
+            elif any(clean_sym.startswith(p) or clean_sym.endswith(p) for p in ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]):
+                pip_size = 0.01 if "JPY" in clean_sym else 0.0001
                 pips = diff / pip_size
                 pnl = pips * 10.0 * lot
             else:
