@@ -335,19 +335,19 @@ export default function Strategy() {
         </div>
       )}
 
-      {/* TOP BAR: TABS SWITCHER & MASTER STATUS */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-900/90 p-4 rounded-xl border border-zinc-800">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+      {/* TOP BAR: RESPONSIVE TABS SWITCHER & MASTER STATUS */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 bg-zinc-900/90 p-3 sm:p-4 rounded-xl border border-zinc-800">
+        <div className="flex items-center gap-3 w-full lg:w-auto">
+          <div className="grid grid-cols-2 sm:flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 w-full sm:w-auto">
             <button
               onClick={() => setActiveTab("trades")}
-              className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition flex items-center gap-2 ${
+              className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-bold font-mono transition flex items-center justify-center gap-1.5 ${
                 activeTab === "trades"
                   ? "bg-cyan-600 text-slate-950 shadow-md"
                   : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              <span>⚡ İşlemler Masası</span>
+              <span>⚡ İşlemler</span>
               {openPositions.length > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/50">
                   {openPositions.length}
@@ -357,13 +357,13 @@ export default function Strategy() {
 
             <button
               onClick={() => setActiveTab("strategy")}
-              className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition flex items-center gap-2 ${
+              className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-bold font-mono transition flex items-center justify-center gap-1.5 ${
                 activeTab === "strategy"
                   ? "bg-cyan-600 text-slate-950 shadow-md"
                   : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              <span>📐 Strateji & Kasa Yönetimi</span>
+              <span>📐 Strateji & Kasa</span>
             </button>
           </div>
         </div>
@@ -416,9 +416,9 @@ export default function Strategy() {
       {/* ========================================================================= */}
       {activeTab === "trades" && (
         <div className="space-y-6">
-          {/* CORE KPI METRICS: Balance, Realized PnL, Win-Rate, Risk & Open Positions */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
-            <div className="bg-zinc-900/80 border border-zinc-800/80 p-4 rounded-xl">
+          {/* CORE KPI METRICS: Responsive Grid */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-3.5">
+            <div className="bg-zinc-900/80 border border-zinc-800/80 p-3 sm:p-4 rounded-xl">
               <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Sanal Kasa Bakiyesi</div>
               <div className="text-xl font-bold text-zinc-100 mt-1 font-mono">
                 ${Number(config?.balance || 46250).toLocaleString("en-US", { minimumFractionDigits: 2 })}
@@ -635,7 +635,7 @@ export default function Strategy() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-4 gap-2 bg-zinc-900/60 p-2.5 rounded-lg text-[11px] font-mono text-center">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-zinc-900/60 p-2.5 rounded-lg text-[11px] font-mono text-center">
                       <div>
                         <span className="text-zinc-500 block text-[10px]">Giriş</span>
                         <span className="text-zinc-200 font-bold">${pos.entry_price}</span>
@@ -1122,8 +1122,8 @@ export default function Strategy() {
       {/* ========================================================================= */}
       {selectedTicker && (
         <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-xs flex">
-          {/* Drawer Body (Left Aligned, fixed width ~440px) */}
-          <div className="bg-zinc-900 border-r border-zinc-800 w-full max-w-md h-full flex flex-col shadow-2xl animate-in slide-in-from-left duration-200">
+          {/* Drawer Body (Left Aligned, mobile full-width / desktop 440px) */}
+          <div className="bg-zinc-900 border-r border-zinc-800 w-full max-w-[90vw] sm:max-w-md h-full flex flex-col shadow-2xl animate-in slide-in-from-left duration-200">
             {/* Drawer Header */}
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/80">
               <div className="flex items-center gap-2.5">
