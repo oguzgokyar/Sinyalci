@@ -123,7 +123,7 @@ class Database:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        conn = sqlite3.connect(str(self.path), timeout=30.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("PRAGMA journal_mode = WAL;")
@@ -132,6 +132,17 @@ class Database:
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(SCHEMA_SQL)
+
+            # Migrations for existing DB instances
+            for alter_sql in [
+                "ALTER TABLE signals ADD COLUMN timeframe TEXT NOT NULL DEFAULT 'H1'",
+                "ALTER TABLE paper_positions ADD COLUMN timeframe TEXT NOT NULL DEFAULT 'H1'",
+            ]:
+                try:
+                    conn.execute(alter_sql)
+                except sqlite3.OperationalError:
+                    pass
+
             defaults = {
                 "kill_switch": "0",
                 "dry_run": "1",
@@ -427,10 +438,14 @@ class Database:
                 "UPDATE paper_positions SET status = ?, current_price = ?, pnl = ?, closed_at = ? WHERE id = ?",
                 (close_status, close_price, round(pnl, 2), now, position_id),
             )
-            # Update strategy balance
-            curr_bal = float(self.get_setting("strategy_balance", "46250.0"))
+            # Update strategy balance directly in same transaction
+            bal_row = conn.execute("SELECT value FROM settings WHERE key = 'strategy_balance'").fetchone()
+            curr_bal = float(bal_row["value"]) if bal_row else 46250.0
             new_bal = round(curr_bal + pnl, 2)
-            self.set_setting("strategy_balance", str(new_bal))
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('strategy_balance', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(new_bal),),
+            )
 
             return dict(conn.execute("SELECT * FROM paper_positions WHERE id = ?", (position_id,)).fetchone())
 

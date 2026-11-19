@@ -7,7 +7,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel
 
-from usb_trader.core.strategy_engine import StrategyEngine
+from usb_trader.core.strategy_engine import StrategyEngine, to_trading_ticker
 
 router = APIRouter(prefix="/api/strategy", tags=["strategy"])
 
@@ -101,13 +101,12 @@ async def list_paper_trades(request: Request, limit: int = 50):
 async def close_paper_trade(position_id: int, payload: ClosePaperRequest, request: Request):
     db = request.app.state.db
     ws_hub = request.app.state.ws
-    pos_row = db.get_signal(position_id) # check exists
     positions = db.list_paper_positions()
     target = next((p for p in positions if p["id"] == position_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="Sanal pozisyon bulunamadı.")
     
-    close_price = payload.close_price if payload.close_price is not None else float(target["current_price"])
+    close_price = payload.close_price if payload.close_price is not None else float(target.get("current_price") or target.get("entry_price") or 0.0)
     closed = db.close_paper_position(position_id, close_price=close_price, close_status=payload.status or "closed_manual")
     await ws_hub.broadcast("paper_position_closed", closed)
     return {"status": "closed", "position": closed}
@@ -214,3 +213,55 @@ async def reject_signal(signal_id: int, request: Request):
     db.add_log(f"Sinyal Reddedildi: #{signal_id} ({signal['ticker']})", level="WARN")
     await request.app.state.ws.broadcast("signal_updated", {"signal_id": signal_id, "status": "rejected"})
     return {"status": "rejected", "signal_id": signal_id}
+
+
+@router.get("/reports/{ticker}")
+async def get_ticker_reports(ticker: str, request: Request):
+    """Fetch all signals and TradingAgents reports for a specific ticker."""
+    db = request.app.state.db
+    engine = get_engine(request)
+    t = ticker.upper()
+    trading_sym = to_trading_ticker(t)
+
+    # 1. Fetch Sinyalci signals from SQLite
+    all_signals = db.list_signals(limit=100)
+    matched_signals = [s for s in all_signals if s["ticker"] == t or t in s["broker_symbol"]]
+
+    # 2. Fetch TradingAgents reports list
+    reports = []
+    try:
+        import urllib.request, json
+        ta_url = f"{engine.tradingagents_url}/api/reports"
+        loop = asyncio.get_running_loop()
+        req = urllib.request.Request(ta_url, headers={"User-Agent": "Sinyalci/1.0"})
+        r_resp = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=5).read().decode())
+        r_data = json.loads(r_resp)
+        all_reports = r_data.get("reports", [])
+        for r in all_reports:
+            r_tick = str(r.get("ticker", "")).upper()
+            if r_tick in [t, trading_sym.upper()] or trading_sym.upper() in r.get("report_id", "").upper():
+                reports.append(r)
+    except Exception:
+        pass
+
+    return {
+        "ticker": t,
+        "trading_ticker": trading_sym,
+        "signals": matched_signals,
+        "reports": reports,
+    }
+
+
+@router.get("/reports/{ticker}/{report_id}")
+async def get_report_detail(ticker: str, report_id: str, request: Request):
+    """Fetch full TradingAgents report content for a given report ID."""
+    engine = get_engine(request)
+    try:
+        import urllib.request, json
+        rep_url = f"{engine.tradingagents_url}/api/reports/{report_id}"
+        loop = asyncio.get_running_loop()
+        req = urllib.request.Request(rep_url, headers={"User-Agent": "Sinyalci/1.0"})
+        rep_resp = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=5).read().decode())
+        return json.loads(rep_resp)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Rapor yüklenemedi: {e}")

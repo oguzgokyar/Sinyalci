@@ -126,6 +126,17 @@ export const api = {
     req<{ candidates: import("./types").PrescreenCandidate[] }>("/api/strategy/prescreen"),
   triggerAutopilotNow: () =>
     req<{ status: string; message: string }>("/api/strategy/autopilot/run-now", { method: "POST" }),
+  getTickerReports: (ticker: string) =>
+    req<{
+      ticker: string;
+      trading_ticker: string;
+      signals: import("./types").StrategySignal[];
+      reports: Array<{ report_id: string; ticker: string; date: string }>;
+    }>(`/api/strategy/reports/${ticker}`),
+  getReportDetail: (ticker: string, reportId: string) =>
+    req<{ report_id: string; ticker: string; date: string; content: string }>(
+      `/api/strategy/reports/${ticker}/${reportId}`
+    ),
 };
 
 export function connectWS(onEvent: (event: string, data: unknown) => void): () => void {
