@@ -18,6 +18,8 @@ class StrategyConfigUpdate(BaseModel):
     min_rr: Optional[float] = None
     symbol_suffix: Optional[str] = None
     auto_execute: Optional[bool] = None
+    timeframe: Optional[str] = None
+    paper_trading: Optional[bool] = None
     watchlist: Optional[list[str]] = None
     favorites: Optional[list[str]] = None
     max_daily_loss: Optional[float] = None
@@ -26,6 +28,12 @@ class StrategyConfigUpdate(BaseModel):
 class ScanRequest(BaseModel):
     ticker: str
     date: Optional[str] = None
+    timeframe: Optional[str] = None
+
+
+class ClosePaperRequest(BaseModel):
+    close_price: Optional[float] = None
+    status: Optional[str] = "closed_manual"
 
 
 def get_engine(request: Request) -> StrategyEngine:
@@ -57,6 +65,36 @@ async def list_signals(request: Request, limit: int = 50):
     return {"signals": signals, "stats": stats}
 
 
+@router.get("/paper-trades")
+async def list_paper_trades(request: Request, limit: int = 50):
+    db = request.app.state.db
+    open_positions = db.list_paper_positions(status="open", limit=limit)
+    closed_positions = db.list_paper_positions(limit=limit)
+    closed_only = [p for p in closed_positions if p["status"] != "open"]
+    stats = db.get_paper_stats()
+    return {
+        "open_positions": open_positions,
+        "closed_positions": closed_only[:20],
+        "stats": stats,
+    }
+
+
+@router.post("/paper-trades/{position_id}/close")
+async def close_paper_trade(position_id: int, payload: ClosePaperRequest, request: Request):
+    db = request.app.state.db
+    ws_hub = request.app.state.ws
+    pos_row = db.get_signal(position_id) # check exists
+    positions = db.list_paper_positions()
+    target = next((p for p in positions if p["id"] == position_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Sanal pozisyon bulunamadı.")
+    
+    close_price = payload.close_price if payload.close_price is not None else float(target["current_price"])
+    closed = db.close_paper_position(position_id, close_price=close_price, close_status=payload.status or "closed_manual")
+    await ws_hub.broadcast("paper_position_closed", closed)
+    return {"status": "closed", "position": closed}
+
+
 @router.post("/scan")
 async def scan_ticker(payload: ScanRequest, request: Request, background_tasks: BackgroundTasks):
     engine = get_engine(request)
@@ -66,13 +104,32 @@ async def scan_ticker(payload: ScanRequest, request: Request, background_tasks: 
 
     async def _do_scan():
         try:
-            db.add_log(f"TradingAgents Taraması Başlatıldı: {ticker}", level="INFO")
+            db.add_log(f"TradingAgents Taraması Başlatıldı: {ticker} ({payload.timeframe or 'H1'})", level="INFO")
             await ws_hub.broadcast("scan_started", {"ticker": ticker})
-            signal = await engine.scan_ticker(ticker, date=payload.date)
+            signal = await engine.scan_ticker(ticker, date=payload.date, timeframe=payload.timeframe)
             await ws_hub.broadcast("signal_created", signal)
             
-            # If auto-execute is enabled, dispatch order directly
             cfg = engine.get_config()
+            # If paper trading is active, create simulated position automatically
+            if cfg.get("paper_trading") and signal["side"] in ["BUY", "SELL"]:
+                paper_pos = db.create_paper_position({
+                    "signal_id": signal["id"],
+                    "symbol": signal["broker_symbol"],
+                    "side": signal["side"],
+                    "lot": signal["calculated_lot"],
+                    "entry_price": signal["entry_price"],
+                    "current_price": signal["entry_price"],
+                    "sl": signal["sl"],
+                    "tp": signal["tp"],
+                    "risk_amount": signal["risk_amount"],
+                    "pnl": 0.0,
+                    "timeframe": signal.get("timeframe", "H1"),
+                })
+                db.update_signal_status(signal["id"], status="paper_active")
+                db.add_log(f"Sanal Pozisyon Açıldı: {signal['broker_symbol']} {signal['side']} {signal['calculated_lot']} Lot @ {signal['entry_price']}", level="INFO")
+                await ws_hub.broadcast("paper_position_opened", paper_pos)
+
+            # If auto-execute on physical mobile device is enabled
             if cfg["auto_execute"] and signal["side"] in ["BUY", "SELL"]:
                 await _execute_signal_internal(signal["id"], request.app)
         except Exception as e:

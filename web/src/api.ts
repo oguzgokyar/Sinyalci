@@ -13,6 +13,8 @@ import type {
   StrategyConfig,
   StrategySignal,
   SignalStats,
+  PaperPosition,
+  PaperStats,
 } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -100,10 +102,21 @@ export const api = {
   updateStrategyConfig: (body: Partial<StrategyConfig>) =>
     req<StrategyConfig>("/api/strategy/config", { method: "POST", body: JSON.stringify(body) }),
   getSignals: () => req<{ signals: StrategySignal[]; stats: SignalStats }>("/api/strategy/signals"),
-  scanTicker: (ticker: string, date?: string) =>
+  getPaperTrades: () =>
+    req<{
+      open_positions: PaperPosition[];
+      closed_positions: PaperPosition[];
+      stats: PaperStats;
+    }>("/api/strategy/paper-trades"),
+  closePaperTrade: (id: number, close_price?: number) =>
+    req<{ status: string; position: PaperPosition }>(`/api/strategy/paper-trades/${id}/close`, {
+      method: "POST",
+      body: JSON.stringify({ close_price, status: "closed_manual" }),
+    }),
+  scanTicker: (ticker: string, date?: string, timeframe?: string) =>
     req<{ status: string; ticker: string; message: string }>("/api/strategy/scan", {
       method: "POST",
-      body: JSON.stringify({ ticker, date }),
+      body: JSON.stringify({ ticker, date, timeframe }),
     }),
   executeSignal: (id: number) =>
     req<{ status: string; order: Order }>(`/api/strategy/signals/${id}/execute`, { method: "POST" }),

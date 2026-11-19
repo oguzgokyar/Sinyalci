@@ -73,6 +73,32 @@ ACG_MARKETS_SYMBOLS: list[dict[str, str]] = [
 ]
 
 
+def to_trading_ticker(ticker: str) -> str:
+    """Map ACG Markets MT5 symbols to Yahoo Finance compatible ticker format."""
+    t = ticker.upper().replace(".PRO", "").replace(".RAW", "").replace("#", "").strip()
+    mapping = {
+        "XAUUSD": "GC=F",
+        "GOLD": "GC=F",
+        "XAGUSD": "SI=F",
+        "SILVER": "SI=F",
+        "USOIL": "CL=F",
+        "UKOIL": "BZ=F",
+        "NAS100": "NQ=F",
+        "US30": "YM=F",
+        "US500": "ES=F",
+        "GER30": "^GDAXI",
+        "GER40": "^GDAXI",
+        "UK100": "^FTSE",
+        "JPN225": "^N225",
+    }
+    if t in mapping:
+        return mapping[t]
+    # For standard Forex (6 chars)
+    if len(t) == 6 and any(t.startswith(p) for p in ["EUR", "GBP", "USD", "AUD", "NZD", "CAD", "CHF"]):
+        return f"{t}=X"
+    return t
+
+
 class StrategyEngine:
     def __init__(self, db: Any, tradingagents_url: Optional[str] = None) -> None:
         self.db = db
@@ -98,6 +124,9 @@ class StrategyEngine:
         risk_amount = round(balance * (risk_pct / 100.0), 2)
         target_profit = round(risk_amount * min_rr, 2)
 
+        tf = self.db.get_setting("strategy_timeframe", "H1")
+        paper_trading = self.db.get_setting("strategy_paper_trading", "1") == "1"
+
         return {
             "balance": balance,
             "risk_percent": risk_pct,
@@ -106,6 +135,8 @@ class StrategyEngine:
             "target_profit": target_profit,
             "symbol_suffix": suffix,
             "auto_execute": auto_exec,
+            "timeframe": tf,
+            "paper_trading": paper_trading,
             "watchlist": watchlist,
             "favorites": favorites,
             "acg_symbols": ACG_MARKETS_SYMBOLS,
@@ -124,6 +155,10 @@ class StrategyEngine:
             self.db.set_setting("strategy_symbol_suffix", str(data["symbol_suffix"]).strip())
         if "auto_execute" in data:
             self.db.set_setting("strategy_auto_execute", "1" if data["auto_execute"] else "0")
+        if "timeframe" in data:
+            self.db.set_setting("strategy_timeframe", str(data["timeframe"]).upper())
+        if "paper_trading" in data:
+            self.db.set_setting("strategy_paper_trading", "1" if data["paper_trading"] else "0")
         if "watchlist" in data:
             if isinstance(data["watchlist"], list):
                 self.db.set_setting("strategy_watchlist", ",".join(data["watchlist"]))
@@ -185,11 +220,14 @@ class StrategyEngine:
             return f"#{t}"
         return f"{t}{suffix}"
 
-    async def scan_ticker(self, ticker: str, date: Optional[str] = None) -> dict[str, Any]:
+    async def scan_ticker(self, ticker: str, date: Optional[str] = None, timeframe: Optional[str] = None) -> dict[str, Any]:
         """Trigger an analysis run on TradingAgents and parse the trading recommendation."""
         target_date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        tf = timeframe or self.db.get_setting("strategy_timeframe", "H1")
+        trading_ticker = to_trading_ticker(ticker)
+
         payload = {
-            "ticker": ticker.upper(),
+            "ticker": trading_ticker,
             "date": target_date,
             "provider": "openai",
             "model": "gemini-3.8-flash-high",
@@ -238,7 +276,7 @@ class StrategyEngine:
             r_resp = await loop.run_in_executor(None, lambda: urllib.request.urlopen(r_req, timeout=10).read().decode())
             r_data = json.loads(r_resp)
             for r in r_data.get("reports", []):
-                if r.get("ticker") == ticker.upper():
+                if r.get("ticker") in [ticker.upper(), trading_ticker.upper()]:
                     report_id = r.get("report_id")
                     break
 
@@ -287,6 +325,7 @@ class StrategyEngine:
         calculated_lot, risk_amount = self.calculate_lot(ticker, entry_price, sl)
         broker_symbol = self.format_broker_symbol(ticker)
         reasoning = reason_match.group(1).strip() if reason_match else f"{ticker} TradingAgents çoklu ajan analizi tamamlandı."
+        tf = self.db.get_setting("strategy_timeframe", "H1")
 
         # Save to Sinyalci DB
         signal_record = self.db.create_signal({
@@ -300,6 +339,7 @@ class StrategyEngine:
             "calculated_lot": calculated_lot,
             "risk_amount": risk_amount,
             "confidence": 85,
+            "timeframe": tf,
             "status": "pending",
             "reasoning": reasoning,
         })

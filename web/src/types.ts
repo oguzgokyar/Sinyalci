@@ -162,6 +162,8 @@ export interface StrategyConfig {
   target_profit: number;
   symbol_suffix: string;
   auto_execute: boolean;
+  timeframe: string;
+  paper_trading: boolean;
   watchlist: string[];
   favorites: string[];
   acg_symbols: AcgSymbol[];
@@ -181,10 +183,38 @@ export interface StrategySignal {
   calculated_lot: number;
   risk_amount: number;
   confidence: number;
-  status: "pending" | "executed" | "rejected" | "expired";
+  timeframe: string;
+  status: "pending" | "executed" | "paper_active" | "rejected" | "expired";
   reasoning: string;
   order_id: number | null;
   created_at: string;
+}
+
+export interface PaperPosition {
+  id: number;
+  signal_id: number | null;
+  symbol: string;
+  side: "BUY" | "SELL";
+  lot: number;
+  entry_price: number;
+  current_price: number;
+  sl: number;
+  tp: number;
+  risk_amount: number;
+  pnl: number;
+  status: "open" | "closed_tp" | "closed_sl" | "closed_manual";
+  timeframe: string;
+  opened_at: string;
+  closed_at: string | null;
+}
+
+export interface PaperStats {
+  open_count: number;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  realized_pnl: number;
 }
 
 export interface SignalStats {

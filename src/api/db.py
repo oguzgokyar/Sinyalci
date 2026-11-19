@@ -89,10 +89,29 @@ CREATE TABLE IF NOT EXISTS signals (
     calculated_lot REAL NOT NULL,
     risk_amount REAL NOT NULL,
     confidence INTEGER NOT NULL DEFAULT 80,
-    status TEXT NOT NULL DEFAULT 'pending', -- pending, executed, rejected, expired
+    timeframe TEXT NOT NULL DEFAULT 'H1', -- H1, H4, D1
+    status TEXT NOT NULL DEFAULT 'pending', -- pending, executed, paper_active, rejected, expired
     reasoning TEXT,
     order_id INTEGER REFERENCES orders(id),
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER REFERENCES signals(id),
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    lot REAL NOT NULL,
+    entry_price REAL NOT NULL,
+    current_price REAL NOT NULL,
+    sl REAL NOT NULL,
+    tp REAL NOT NULL,
+    risk_amount REAL NOT NULL,
+    pnl REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'open', -- open, closed_tp, closed_sl, closed_manual
+    timeframe TEXT NOT NULL DEFAULT 'H1',
+    opened_at TEXT NOT NULL,
+    closed_at TEXT
 );
 """
 
@@ -126,10 +145,12 @@ class Database:
                 "strategy_balance": "46250.0",
                 "strategy_risk_percent": "1.0",
                 "strategy_min_rr": "2.0",
-                "strategy_symbol_suffix": ".us",
+                "strategy_symbol_suffix": ".pro",
                 "strategy_auto_execute": "0",
-                "strategy_watchlist": "NVDA,AAPL,MSFT,TSLA,AMZN,META,GOOGL,AMD",
-                "strategy_favorites": "NVDA,AAPL,TSLA,MSFT,AMZN",
+                "strategy_watchlist": "XAUUSD,EURUSD,GBPUSD,USDJPY,NAS100",
+                "strategy_favorites": "XAUUSD,EURUSD,GBPUSD,USDJPY,NAS100",
+                "strategy_timeframe": "H1",
+                "strategy_paper_trading": "1",
                 "strategy_max_daily_loss": "925.0",
             }
             for k, v in defaults.items():
@@ -338,13 +359,99 @@ class Database:
             cur = conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
             return cur.rowcount > 0
 
+    # --- Paper Positions ---
+    def create_paper_position(self, data: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO paper_positions (signal_id, symbol, side, lot, entry_price, current_price, sl, tp, risk_amount, pnl, status, timeframe, opened_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)""",
+                (
+                    data.get("signal_id"),
+                    data["symbol"].upper(),
+                    data["side"].upper(),
+                    float(data["lot"]),
+                    float(data["entry_price"]),
+                    float(data.get("current_price", data["entry_price"])),
+                    float(data["sl"]),
+                    float(data["tp"]),
+                    float(data.get("risk_amount", 462.5)),
+                    float(data.get("pnl", 0.0)),
+                    data.get("timeframe", "H1"),
+                    now,
+                ),
+            )
+            return dict(conn.execute("SELECT * FROM paper_positions WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+    def list_paper_positions(self, status: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            if status:
+                rows = conn.execute("SELECT * FROM paper_positions WHERE status = ? ORDER BY id DESC LIMIT ?", (status, limit)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM paper_positions ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def close_paper_position(self, position_id: int, close_price: float, close_status: str = "closed_manual") -> Optional[dict[str, Any]]:
+        now = utc_now()
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM paper_positions WHERE id = ?", (position_id,)).fetchone()
+            if not row:
+                return None
+            pos = dict(row)
+            entry = float(pos["entry_price"])
+            lot = float(pos["lot"])
+            side = pos["side"]
+            symbol = pos["symbol"]
+
+            # Calculate PnL
+            diff = (close_price - entry) if side == "BUY" else (entry - close_price)
+            if "XAUUSD" in symbol or "GOLD" in symbol:
+                pnl = diff * 100.0 * lot
+            elif any(symbol.startswith(p) or symbol.endswith(p) for p in ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]):
+                pip_size = 0.01 if "JPY" in symbol else 0.0001
+                pips = diff / pip_size
+                pnl = pips * 10.0 * lot
+            else:
+                pnl = diff * lot
+
+            conn.execute(
+                "UPDATE paper_positions SET status = ?, current_price = ?, pnl = ?, closed_at = ? WHERE id = ?",
+                (close_status, close_price, round(pnl, 2), now, position_id),
+            )
+            # Update strategy balance
+            curr_bal = float(self.get_setting("strategy_balance", "46250.0"))
+            new_bal = round(curr_bal + pnl, 2)
+            self.set_setting("strategy_balance", str(new_bal))
+
+            return dict(conn.execute("SELECT * FROM paper_positions WHERE id = ?", (position_id,)).fetchone())
+
+    def get_paper_stats(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            open_count = conn.execute("SELECT COUNT(*) AS c FROM paper_positions WHERE status = 'open'").fetchone()["c"]
+            closed_rows = conn.execute("SELECT pnl, status FROM paper_positions WHERE status != 'open'").fetchall()
+            closed_trades = [dict(r) for r in closed_rows]
+            total_closed = len(closed_trades)
+            wins = sum(1 for t in closed_trades if t["pnl"] > 0)
+            losses = sum(1 for t in closed_trades if t["pnl"] < 0)
+            win_rate = round((wins / total_closed * 100), 1) if total_closed > 0 else 0.0
+            total_realized_pnl = round(sum(t["pnl"] for t in closed_trades), 2)
+            
+            return {
+                "open_count": open_count,
+                "total_trades": total_closed,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": win_rate,
+                "realized_pnl": total_realized_pnl,
+            }
+
     # --- Signals ---
     def create_signal(self, data: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()
         with self._connect() as conn:
             cur = conn.execute(
-                """INSERT INTO signals (ticker, broker_symbol, side, entry_price, sl, tp, risk_reward, calculated_lot, risk_amount, confidence, status, reasoning, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO signals (ticker, broker_symbol, side, entry_price, sl, tp, risk_reward, calculated_lot, risk_amount, confidence, timeframe, status, reasoning, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     data["ticker"].upper(),
                     data.get("broker_symbol", data["ticker"]).upper(),
@@ -356,6 +463,7 @@ class Database:
                     float(data.get("calculated_lot", 0.1)),
                     float(data.get("risk_amount", 462.5)),
                     int(data.get("confidence", 80)),
+                    data.get("timeframe", "H1"),
                     data.get("status", "pending"),
                     data.get("reasoning", ""),
                     now,
