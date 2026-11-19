@@ -126,6 +126,8 @@ class StrategyEngine:
 
         tf = self.db.get_setting("strategy_timeframe", "H1")
         paper_trading = self.db.get_setting("strategy_paper_trading", "1") == "1"
+        autopilot_enabled = self.db.get_setting("strategy_autopilot_enabled", "1") == "1"
+        last_autopilot = self.db.get_setting("strategy_last_autopilot_run", "")
 
         return {
             "balance": balance,
@@ -135,6 +137,8 @@ class StrategyEngine:
             "target_profit": target_profit,
             "symbol_suffix": suffix,
             "auto_execute": auto_exec,
+            "autopilot_enabled": autopilot_enabled,
+            "last_autopilot_run": last_autopilot,
             "timeframe": tf,
             "paper_trading": paper_trading,
             "watchlist": watchlist,
@@ -155,6 +159,8 @@ class StrategyEngine:
             self.db.set_setting("strategy_symbol_suffix", str(data["symbol_suffix"]).strip())
         if "auto_execute" in data:
             self.db.set_setting("strategy_auto_execute", "1" if data["auto_execute"] else "0")
+        if "autopilot_enabled" in data:
+            self.db.set_setting("strategy_autopilot_enabled", "1" if data["autopilot_enabled"] else "0")
         if "timeframe" in data:
             self.db.set_setting("strategy_timeframe", str(data["timeframe"]).upper())
         if "paper_trading" in data:
@@ -347,3 +353,266 @@ class StrategyEngine:
         self.db.add_log(f"Strateji Sinyali Üretildi: {ticker} {side} @ {entry_price} (SL: {sl}, TP: {tp}, Lot: {calculated_lot})", level="INFO")
 
         return signal_record
+
+    def fetch_live_chart(self, ticker: str, interval: str = "1h", range_: str = "5d") -> Optional[dict[str, Any]]:
+        """Fetch live candle data and current price from Yahoo Finance."""
+        sym = to_trading_ticker(ticker)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={interval}&range={range_}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode())
+                res = data["chart"]["result"][0]
+                meta = res["meta"]
+                quote = res["indicators"]["quote"][0]
+                closes = [float(c) for c in quote.get("close", []) if c is not None]
+                highs = [float(h) for h in quote.get("high", []) if h is not None]
+                lows = [float(l) for l in quote.get("low", []) if l is not None]
+                price = meta.get("regularMarketPrice") or (closes[-1] if closes else 0.0)
+                return {"symbol": sym, "price": float(price), "closes": closes, "highs": highs, "lows": lows}
+        except Exception as e:
+            logger.warning("Could not fetch Yahoo chart for %s (%s): %s", ticker, sym, e)
+            return None
+
+    @staticmethod
+    def calculate_technicals(closes: list[float]) -> dict[str, float]:
+        """Compute 10 EMA, 50 SMA, and 14 RSI without external dependencies."""
+        if not closes or len(closes) < 15:
+            return {"rsi": 50.0, "ema10": closes[-1] if closes else 0.0, "sma50": closes[-1] if closes else 0.0}
+
+        # 50 SMA
+        sma50_window = closes[-50:] if len(closes) >= 50 else closes
+        sma50 = sum(sma50_window) / len(sma50_window)
+
+        # 10 EMA
+        k = 2.0 / 11.0
+        ema10 = sum(closes[:10]) / 10.0
+        for p in closes[10:]:
+            ema10 = p * k + ema10 * (1 - k)
+
+        # 14 RSI
+        period = 14
+        deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        gains = [d if d > 0 else 0.0 for d in deltas]
+        losses = [-d if d < 0 else 0.0 for d in deltas]
+
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+
+        for i in range(period, len(deltas)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+        if avg_loss == 0:
+            rsi = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+
+        return {"rsi": round(rsi, 2), "ema10": round(ema10, 4), "sma50": round(sma50, 4)}
+
+    def prescreen_ticker(self, ticker: str, timeframe: str = "H1") -> dict[str, Any]:
+        """Fast 0.2s technical analysis: checks pullback to 10 EMA and RSI momentum."""
+        interval = "1h" if timeframe == "H1" else ("4h" if timeframe == "H4" else "1d")
+        chart = self.fetch_live_chart(ticker, interval=interval, range_="1mo")
+
+        if not chart or len(chart["closes"]) < 15:
+            return {"ticker": ticker, "price": 0.0, "setup": "NONE", "score": 0, "reason": "Veri yok"}
+
+        price = chart["price"]
+        closes = chart["closes"]
+        techs = self.calculate_technicals(closes)
+        rsi = techs["rsi"]
+        ema10 = techs["ema10"]
+        sma50 = techs["sma50"]
+
+        score = 0
+        setup = "NONE"
+        reasons = []
+
+        # Pullback distance to 10 EMA
+        dist_ema10 = abs(price - ema10) / ema10 * 100.0
+
+        # Bullish Pullback Setup
+        if price >= sma50:
+            reasons.append("Fiyat 50 SMA üstünde (Boğa Trendi)")
+            score += 25
+            if dist_ema10 <= 0.8:
+                score += 35
+                reasons.append("10 EMA ortalamasına geri çekildi (Pullback Destek)")
+            if 28.0 <= rsi <= 48.0:
+                score += 35
+                reasons.append(f"RSI toparlanma bölgesinde ({rsi})")
+            if score >= 60:
+                setup = "BUY"
+        # Bearish Pullback / Relief Setup
+        elif price < sma50:
+            reasons.append("Fiyat 50 SMA altında (Ayı Trendi)")
+            score += 25
+            if dist_ema10 <= 0.8:
+                score += 35
+                reasons.append("10 EMA direncine tepki verdi (Pullback Direnç)")
+            if 52.0 <= rsi <= 72.0:
+                score += 35
+                reasons.append(f"RSI aşırı alım rahatlama bölgesinde ({rsi})")
+            if score >= 60:
+                setup = "SELL"
+
+        return {
+            "ticker": ticker.upper(),
+            "price": price,
+            "rsi": rsi,
+            "ema10": ema10,
+            "sma50": sma50,
+            "setup": setup,
+            "score": score,
+            "reason": "; ".join(reasons) if reasons else "Yatay piyasa",
+            "timeframe": timeframe,
+        }
+
+    def prescreen_favorites(self) -> list[dict[str, Any]]:
+        """Prescreen all favorite symbols and return sorted by setup quality."""
+        cfg = self.get_config()
+        tf = cfg.get("timeframe", "H1")
+        results = []
+        for ticker in cfg.get("favorites", []):
+            res = self.prescreen_ticker(ticker, timeframe=tf)
+            results.append(res)
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results
+
+    async def update_live_paper_positions(self, ws_hub: Optional[Any] = None) -> list[dict[str, Any]]:
+        """Checks open paper positions against live market price, updates floating PnL, triggers TP/SL."""
+        open_positions = self.db.list_paper_positions(status="open")
+        if not open_positions:
+            return []
+
+        updated = []
+        for pos in open_positions:
+            sym = pos["symbol"]
+            ticker = sym.replace(".PRO", "").replace(".RAW", "").replace("#", "")
+            chart = self.fetch_live_chart(ticker, interval="1m", range_="1d")
+            if not chart or chart["price"] <= 0:
+                continue
+
+            current_price = chart["price"]
+            entry = float(pos["entry_price"])
+            sl = float(pos["sl"])
+            tp = float(pos["tp"])
+            lot = float(pos["lot"])
+            side = pos["side"]
+
+            # Calculate live floating PnL
+            diff = (current_price - entry) if side == "BUY" else (entry - current_price)
+            if "XAUUSD" in sym or "GOLD" in sym:
+                pnl = diff * 100.0 * lot
+            elif any(sym.startswith(p) or sym.endswith(p) for p in ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]):
+                pip_size = 0.01 if "JPY" in sym else 0.0001
+                pips = diff / pip_size
+                pnl = pips * 10.0 * lot
+            else:
+                pnl = diff * lot
+
+            pnl = round(pnl, 2)
+
+            # Check TP / SL hit
+            closed_status = None
+            if side == "BUY":
+                if current_price >= tp:
+                    closed_status = "closed_tp"
+                elif current_price <= sl:
+                    closed_status = "closed_sl"
+            elif side == "SELL":
+                if current_price <= tp:
+                    closed_status = "closed_tp"
+                elif current_price >= sl:
+                    closed_status = "closed_sl"
+
+            if closed_status:
+                closed = self.db.close_paper_position(pos["id"], close_price=current_price, close_status=closed_status)
+                self.db.add_log(
+                    f"Sanal Pozisyon Kapatıldı ({closed_status}): #{pos['id']} {sym} {side} @ {current_price} (PnL: ${pnl})",
+                    level="INFO",
+                )
+                if ws_hub:
+                    await ws_hub.broadcast("paper_position_closed", closed)
+                updated.append(closed)
+            else:
+                self.db.update_paper_position_price(pos["id"], current_price=current_price, pnl=pnl)
+                pos["current_price"] = current_price
+                pos["pnl"] = pnl
+                updated.append(pos)
+
+        if ws_hub and updated:
+            stats = self.db.get_paper_stats()
+            await ws_hub.broadcast("paper_positions_updated", {"positions": updated, "stats": stats})
+
+        return updated
+
+    async def run_autopilot_tick(self, ws_hub: Optional[Any] = None) -> Optional[dict[str, Any]]:
+        """Autonomous bot decision engine: scans pre-filtered setups and triggers TradingAgents."""
+        cfg = self.get_config()
+        if not cfg.get("autopilot_enabled"):
+            return None
+
+        # 1. Update existing open positions first
+        await self.update_live_paper_positions(ws_hub=ws_hub)
+
+        # 2. Check position limit (max 3 concurrent open positions)
+        open_count = len(self.db.list_paper_positions(status="open"))
+        if open_count >= 3:
+            return None
+
+        # 3. Check daily circuit breaker
+        paper_stats = self.db.get_paper_stats()
+        if paper_stats["realized_pnl"] <= -cfg.get("max_daily_loss", 925.0):
+            logger.warning("Autopilot circuit breaker active! Daily loss threshold reached.")
+            return None
+
+        # 4. Run fast pre-screener
+        candidates = self.prescreen_favorites()
+        best = next((c for c in candidates if c["score"] >= 60 and c["setup"] in ["BUY", "SELL"]), None)
+
+        if not best:
+            return None
+
+        ticker = best["ticker"]
+        tf = cfg.get("timeframe", "H1")
+        now_str = datetime.now(timezone.utc).isoformat()
+        self.db.set_setting("strategy_last_autopilot_run", f"{now_str} | {ticker} ({best['setup']} Score: {best['score']})")
+
+        self.db.add_log(
+            f"Otopilot Fırsat Yakaladı: {ticker} ({best['setup']} Puanı: {best['score']}/100) -> TradingAgents Onayına Gönderiliyor...",
+            level="INFO",
+        )
+        if ws_hub:
+            await ws_hub.broadcast("autopilot_triggered", best)
+
+        # 5. Deep confirmation via TradingAgents
+        signal = await self.scan_ticker(ticker, timeframe=tf)
+
+        # 6. If paper trading is active and signal confirmed in same direction
+        if cfg.get("paper_trading") and signal["side"] in ["BUY", "SELL"]:
+            paper_pos = self.db.create_paper_position({
+                "signal_id": signal["id"],
+                "symbol": signal["broker_symbol"],
+                "side": signal["side"],
+                "lot": signal["calculated_lot"],
+                "entry_price": signal["entry_price"],
+                "current_price": signal["entry_price"],
+                "sl": signal["sl"],
+                "tp": signal["tp"],
+                "risk_amount": signal["risk_amount"],
+                "pnl": 0.0,
+                "timeframe": tf,
+            })
+            self.db.update_signal_status(signal["id"], status="paper_active")
+            self.db.add_log(
+                f"Otopilot Sanal Pozisyon Açtı: {signal['broker_symbol']} {signal['side']} {signal['calculated_lot']} Lot @ {signal['entry_price']}",
+                level="INFO",
+            )
+            if ws_hub:
+                await ws_hub.broadcast("paper_position_opened", paper_pos)
+
+        return signal
+

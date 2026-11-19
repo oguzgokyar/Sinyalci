@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { api, connectWS } from "../api";
-import type { StrategyConfig, StrategySignal, SignalStats, AcgSymbol, PaperPosition, PaperStats } from "../types";
+import type { StrategyConfig, StrategySignal, SignalStats, AcgSymbol, PaperPosition, PaperStats, PrescreenCandidate } from "../types";
 
 export default function Strategy() {
   const [config, setConfig] = useState<StrategyConfig | null>(null);
@@ -22,6 +22,11 @@ export default function Strategy() {
   const [timeframe, setTimeframe] = useState<string>("H1");
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
+  // Autopilot & Prescreener state
+  const [autopilotEnabled, setAutopilotEnabled] = useState(true);
+  const [prescreenList, setPrescreenList] = useState<PrescreenCandidate[]>([]);
+  const [showRadar, setShowRadar] = useState(false);
+
   // Modals & Collapsibles (Minimalist UI)
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showCatalogModal, setShowCatalogModal] = useState(false);
@@ -40,6 +45,15 @@ export default function Strategy() {
   const showToast = (msg: string, type: "ok" | "err" = "ok") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const loadPrescreen = async () => {
+    try {
+      const res = await api.getPrescreen();
+      setPrescreenList(res.candidates || []);
+    } catch {
+      // ignore
+    }
   };
 
   const loadData = async () => {
@@ -63,8 +77,11 @@ export default function Strategy() {
       setSuffix(cfg.symbol_suffix || ".pro");
       setAutoExec(cfg.auto_execute);
       setPaperTrading(cfg.paper_trading !== false);
+      setAutopilotEnabled(cfg.autopilot_enabled !== false);
       setTimeframe(cfg.timeframe || "H1");
       setFavorites(cfg.favorites || ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "NAS100"]);
+
+      loadPrescreen();
     } catch (e: any) {
       showToast("Veri yüklenemedi: " + (e?.message || e), "err");
     } finally {
@@ -74,6 +91,12 @@ export default function Strategy() {
 
   useEffect(() => {
     loadData();
+
+    // Periodic live prescreen refresh (every 30 seconds)
+    const intervalId = setInterval(() => {
+      loadPrescreen();
+    }, 30000);
+
     const unsub = connectWS((event, data) => {
       if (
         event === "signal_created" ||
@@ -89,6 +112,14 @@ export default function Strategy() {
           setClosedPositions(paperRes.closed_positions);
           setPaperStats(paperRes.stats);
         }).catch(() => {});
+        loadPrescreen();
+      } else if (event === "paper_positions_updated") {
+        const payload = data as any;
+        if (payload?.positions) setOpenPositions(payload.positions);
+        if (payload?.stats) setPaperStats(payload.stats);
+      } else if (event === "autopilot_triggered") {
+        const cand = data as any;
+        showToast(`🤖 Otopilot Fırsat Yakaladı: ${cand.ticker} (${cand.setup} Puan: ${cand.score}/100)!`);
       } else if (event === "scan_started") {
         const t = (data as any)?.ticker;
         if (t) setScanningTicker(t);
@@ -97,8 +128,34 @@ export default function Strategy() {
         showToast(`Tarama hatası: ${(data as any)?.error}`, "err");
       }
     });
-    return unsub;
+
+    return () => {
+      clearInterval(intervalId);
+      unsub();
+    };
   }, []);
+
+  const handleToggleAutopilot = async () => {
+    const next = !autopilotEnabled;
+    setAutopilotEnabled(next);
+    try {
+      const updated = await api.updateStrategyConfig({ autopilot_enabled: next });
+      setConfig(updated);
+      showToast(next ? "🤖 Otopilot AKTİF: Piyasa ve seanslar otomatik taranıyor." : "⏸️ Otopilot DURDURULDU.");
+    } catch (e: any) {
+      showToast("Otopilot güncellenemedi: " + (e?.message || e), "err");
+    }
+  };
+
+  const handleRunAutopilotNow = async () => {
+    try {
+      await api.triggerAutopilotNow();
+      showToast("🚀 Otopilot anlık döngüsü tetiklendi! En yüksek puanlı fırsat analiz ediliyor...");
+      loadPrescreen();
+    } catch (e: any) {
+      showToast("Tetikleme hatası: " + (e?.message || e), "err");
+    }
+  };
 
   const handleSaveConfig = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -111,6 +168,7 @@ export default function Strategy() {
         auto_execute: autoExec,
         timeframe: timeframe,
         paper_trading: paperTrading,
+        autopilot_enabled: autopilotEnabled,
         favorites: favorites,
         watchlist: favorites,
       });
@@ -249,8 +307,30 @@ export default function Strategy() {
           </div>
         </div>
 
-        {/* Timeframe Selector & Actions */}
-        <div className="flex items-center gap-2.5">
+        {/* Master Action Tools */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Autopilot Switch */}
+          <button
+            onClick={handleToggleAutopilot}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition flex items-center gap-1.5 border ${
+              autopilotEnabled
+                ? "bg-emerald-950/60 border-emerald-500 text-emerald-300 shadow-lg shadow-emerald-950/30"
+                : "bg-zinc-950 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${autopilotEnabled ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} />
+            {autopilotEnabled ? "Otopilot Devrede" : "Otopilotu Başlat"}
+          </button>
+
+          {/* Quick Autopilot Run */}
+          <button
+            onClick={handleRunAutopilotNow}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-700/60 transition flex items-center gap-1.5"
+            title="Sıradaki seansı beklemeden hemen radar taraması yap ve fırsatı işleme al"
+          >
+            <span>⚡ Şimdi Tara & İşle</span>
+          </button>
+
           {/* Timeframe Buttons */}
           <div className="bg-zinc-950 p-1 rounded-lg border border-zinc-800 flex items-center gap-1">
             {["H1", "H4", "D1"].map((tf) => (
@@ -325,6 +405,118 @@ export default function Strategy() {
           </div>
           <div className="text-[10px] text-zinc-500 mt-1">{signals.filter(s => s.status === "pending").length} Sinyal Beklemede</div>
         </div>
+      </div>
+
+      {/* TECHNICAL RADAR & PRESCREENER (0.2s LIGHTWEIGHT PRE-FILTER) */}
+      <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">📡</span>
+            <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider font-mono">
+              Otopilot Teknik Radarı (Hafif Ön-Filtre • 10 EMA & 14 RSI)
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowRadar(!showRadar)}
+              className="text-xs text-cyan-400 hover:text-cyan-300 font-mono"
+            >
+              {showRadar ? "▲ Detayları Gizle" : "▼ Radar Tablosunu Göster"}
+            </button>
+            <button
+              onClick={loadPrescreen}
+              className="px-2 py-0.5 rounded text-[11px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono transition"
+            >
+              Yenile
+            </button>
+          </div>
+        </div>
+
+        {/* Top Radar Snapshot Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+          {prescreenList.map((cand) => {
+            const hasSignal = cand.score >= 60;
+            return (
+              <div
+                key={cand.ticker}
+                onClick={() => handleScan(cand.ticker)}
+                className={`p-2.5 rounded-lg border cursor-pointer transition ${
+                  hasSignal
+                    ? cand.setup === "BUY"
+                      ? "bg-emerald-950/30 border-emerald-500/50 hover:bg-emerald-950/50"
+                      : "bg-rose-950/30 border-rose-500/50 hover:bg-rose-950/50"
+                    : "bg-zinc-950/60 border-zinc-800 hover:border-zinc-700"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-xs text-zinc-200">{cand.ticker}</span>
+                  <span
+                    className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded ${
+                      cand.setup === "BUY"
+                        ? "bg-emerald-500/20 text-emerald-400"
+                        : cand.setup === "SELL"
+                        ? "bg-rose-500/20 text-rose-400"
+                        : "bg-zinc-800 text-zinc-400"
+                    }`}
+                  >
+                    {cand.setup} {cand.score}/100
+                  </span>
+                </div>
+                <div className="text-[11px] text-zinc-400 mt-1 font-mono">${cand.price}</div>
+                <div className="text-[10px] text-zinc-500 mt-0.5 truncate">{cand.reason}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Detailed Radar Table */}
+        {showRadar && (
+          <div className="overflow-x-auto pt-2 border-t border-zinc-800/80">
+            <table className="w-full text-left text-xs font-mono">
+              <thead className="text-[10px] uppercase text-zinc-400 bg-zinc-950/60">
+                <tr>
+                  <th className="py-2 px-3">Parite</th>
+                  <th className="py-2 px-3">Güncel Fiyat</th>
+                  <th className="py-2 px-3">14 RSI</th>
+                  <th className="py-2 px-3">10 EMA</th>
+                  <th className="py-2 px-3">50 SMA</th>
+                  <th className="py-2 px-3">Teknik Durum</th>
+                  <th className="py-2 px-3">Radar Puanı</th>
+                  <th className="py-2 px-3 text-right">Ajan Onayı</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/60">
+                {prescreenList.map((c) => (
+                  <tr key={c.ticker} className="hover:bg-zinc-800/30">
+                    <td className="py-2 px-3 font-bold text-zinc-100">{c.ticker}</td>
+                    <td className="py-2 px-3 text-zinc-200">${c.price}</td>
+                    <td className="py-2 px-3 text-cyan-400">{c.rsi}</td>
+                    <td className="py-2 px-3 text-zinc-300">{c.ema10}</td>
+                    <td className="py-2 px-3 text-zinc-400">{c.sma50}</td>
+                    <td className="py-2 px-3 text-zinc-300 text-[11px]">{c.reason}</td>
+                    <td className="py-2 px-3">
+                      <span
+                        className={`font-bold ${
+                          c.score >= 60 ? (c.setup === "BUY" ? "text-emerald-400" : "text-rose-400") : "text-zinc-500"
+                        }`}
+                      >
+                        {c.score}/100
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <button
+                        onClick={() => handleScan(c.ticker)}
+                        className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-cyan-600 hover:text-slate-950 text-zinc-300 text-[11px] transition"
+                      >
+                        Derin Analiz Et
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* QUICK LAUNCH BAR: FAVORITES ONE-CLICK SCANNER */}
@@ -411,10 +603,14 @@ export default function Strategy() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 bg-zinc-900/60 p-2.5 rounded-lg text-[11px] font-mono text-center">
+                <div className="grid grid-cols-4 gap-2 bg-zinc-900/60 p-2.5 rounded-lg text-[11px] font-mono text-center">
                   <div>
                     <span className="text-zinc-500 block text-[10px]">Giriş</span>
                     <span className="text-zinc-200 font-bold">${pos.entry_price}</span>
+                  </div>
+                  <div>
+                    <span className="text-cyan-400 block text-[10px]">Güncel</span>
+                    <span className="text-zinc-100 font-bold">${pos.current_price || pos.entry_price}</span>
                   </div>
                   <div>
                     <span className="text-rose-400 block text-[10px]">Stop Loss</span>

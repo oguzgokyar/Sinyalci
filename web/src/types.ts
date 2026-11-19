@@ -162,6 +162,8 @@ export interface StrategyConfig {
   target_profit: number;
   symbol_suffix: string;
   auto_execute: boolean;
+  autopilot_enabled: boolean;
+  last_autopilot_run?: string;
   timeframe: string;
   paper_trading: boolean;
   watchlist: string[];
@@ -169,6 +171,18 @@ export interface StrategyConfig {
   acg_symbols: AcgSymbol[];
   max_daily_loss: number;
   tradingagents_url: string;
+}
+
+export interface PrescreenCandidate {
+  ticker: string;
+  price: number;
+  rsi: number;
+  ema10: number;
+  sma50: number;
+  setup: "BUY" | "SELL" | "NONE";
+  score: number;
+  reason: string;
+  timeframe: string;
 }
 
 export interface StrategySignal {

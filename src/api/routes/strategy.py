@@ -20,6 +20,7 @@ class StrategyConfigUpdate(BaseModel):
     auto_execute: Optional[bool] = None
     timeframe: Optional[str] = None
     paper_trading: Optional[bool] = None
+    autopilot_enabled: Optional[bool] = None
     watchlist: Optional[list[str]] = None
     favorites: Optional[list[str]] = None
     max_daily_loss: Optional[float] = None
@@ -55,6 +56,23 @@ async def update_strategy_config(payload: StrategyConfigUpdate, request: Request
     ws_hub = request.app.state.ws
     await ws_hub.broadcast("strategy_config_updated", updated)
     return updated
+
+
+@router.get("/prescreen")
+async def prescreen_favorites(request: Request):
+    """Fast technical prescreen of all favorites without triggering TradingAgents."""
+    engine = get_engine(request)
+    candidates = engine.prescreen_favorites()
+    return {"candidates": candidates}
+
+
+@router.post("/autopilot/run-now")
+async def run_autopilot_now(request: Request, background_tasks: BackgroundTasks):
+    """Trigger an immediate autopilot tick in the background."""
+    engine = get_engine(request)
+    ws_hub = request.app.state.ws
+    background_tasks.add_task(engine.run_autopilot_tick, ws_hub=ws_hub)
+    return {"status": "triggered", "message": "Otopilot döngüsü anlık tetiklendi."}
 
 
 @router.get("/signals")

@@ -122,6 +122,10 @@ export const api = {
     req<{ status: string; order: Order }>(`/api/strategy/signals/${id}/execute`, { method: "POST" }),
   rejectSignal: (id: number) =>
     req<{ status: string; signal_id: number }>(`/api/strategy/signals/${id}/reject`, { method: "POST" }),
+  getPrescreen: () =>
+    req<{ candidates: import("./types").PrescreenCandidate[] }>("/api/strategy/prescreen"),
+  triggerAutopilotNow: () =>
+    req<{ status: string; message: string }>("/api/strategy/autopilot/run-now", { method: "POST" }),
 };
 
 export function connectWS(onEvent: (event: string, data: unknown) => void): () => void {

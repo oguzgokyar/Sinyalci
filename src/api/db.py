@@ -147,11 +147,13 @@ class Database:
                 "strategy_min_rr": "2.0",
                 "strategy_symbol_suffix": ".pro",
                 "strategy_auto_execute": "0",
+                "strategy_autopilot_enabled": "1",
                 "strategy_watchlist": "XAUUSD,EURUSD,GBPUSD,USDJPY,NAS100",
                 "strategy_favorites": "XAUUSD,EURUSD,GBPUSD,USDJPY,NAS100",
                 "strategy_timeframe": "H1",
                 "strategy_paper_trading": "1",
                 "strategy_max_daily_loss": "925.0",
+                "strategy_last_autopilot_run": "",
             }
             for k, v in defaults.items():
                 conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
@@ -390,6 +392,13 @@ class Database:
             else:
                 rows = conn.execute("SELECT * FROM paper_positions ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
             return [dict(r) for r in rows]
+
+    def update_paper_position_price(self, position_id: int, current_price: float, pnl: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE paper_positions SET current_price = ?, pnl = ? WHERE id = ? AND status = 'open'",
+                (current_price, round(pnl, 2), position_id),
+            )
 
     def close_paper_position(self, position_id: int, close_price: float, close_status: str = "closed_manual") -> Optional[dict[str, Any]]:
         now = utc_now()

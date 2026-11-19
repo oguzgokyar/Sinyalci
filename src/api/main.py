@@ -22,7 +22,7 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
     ws_hub = EventHub()
     agent_hub = AgentHub()
     dm = DeviceManager(db, ws_hub)
-    scheduler = OrderScheduler(db, dm, poll_interval_s=1.0)
+    scheduler = OrderScheduler(db, dm, ws_hub=ws_hub, poll_interval_s=1.0)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
