@@ -40,7 +40,7 @@ async def delete_device(request: Request, device_id: int):
 @router.get("/{device_id}/screenshot")
 async def get_device_screenshot(request: Request, device_id: int):
     try:
-        frame, _ = request.app.state.dm.capture_screen(device_id)
+        frame, _ = await request.app.state.dm.capture_screen_async(device_id)
         ok, buf = cv2.imencode(".png", frame)
         if not ok:
             raise RuntimeError("PNG encode failed")
@@ -52,11 +52,20 @@ async def get_device_screenshot(request: Request, device_id: int):
 @router.post("/{device_id}/test-aoa")
 async def test_device_aoa(request: Request, device_id: int):
     try:
-        res = request.app.state.dm.test_aoa(device_id)
+        res = await request.app.state.dm.test_aoa_async(device_id)
         await request.app.state.ws.broadcast("devices_changed", request.app.state.db.list_devices())
         return res
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/{device_id}/close-position")
+async def close_device_position(request: Request, device_id: int):
+    try:
+        res = await request.app.state.dm.close_position_async(device_id)
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/{device_id}/calibrate")

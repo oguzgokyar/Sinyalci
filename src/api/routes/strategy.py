@@ -195,6 +195,7 @@ async def _execute_signal_internal(signal_id: int, app: Any) -> dict[str, Any]:
     db.add_log(f"Sinyal Emre Dönüştürüldü: #{order['id']} ({signal['broker_symbol']} {signal['side']} {signal['calculated_lot']} Lot)", level="INFO")
 
     await ws_hub.broadcast("signal_executed", {"signal_id": signal_id, "order": order})
+    asyncio.create_task(dm.execute_order_async(order["id"]))
     return {"status": "order_created", "order": order}
 
 

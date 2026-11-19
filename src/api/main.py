@@ -21,7 +21,7 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
     db = Database(db_path)
     ws_hub = EventHub()
     agent_hub = AgentHub()
-    dm = DeviceManager(db, ws_hub)
+    dm = DeviceManager(db, ws_hub, agent_hub=agent_hub)
     scheduler = OrderScheduler(db, dm, ws_hub=ws_hub, poll_interval_s=1.0)
 
     @asynccontextmanager
@@ -70,16 +70,58 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
             return
         client_ip = ws.client.host if ws.client else ""
         await agent_hub.register(device_id, ws, ip=client_ip, model=model)
-        db.add_log(f"4.5G Telefon Ajanı bağlandı: {device_id} ({client_ip})", level="INFO")
+
+        # Auto-link or auto-create device in DB so it immediately reflects in UI
+        existing = db.list_devices()
+        matched = next(
+            (d for d in existing if d.get("serial") == device_id or d.get("name", "").lower().replace(" ", "_") == device_id.lower()),
+            None,
+        )
+        if not matched:
+            dev_name = model if model != "Android" else "Samsung Galaxy A11"
+            matched = db.create_device({
+                "name": dev_name,
+                "serial": device_id,
+                "usb_vid": "04e8",
+                "usb_pid": "6860",
+                "screen_width": 720,
+                "screen_height": 1560,
+                "profile_path": "profiles/galaxy_a11_mt5.json",
+            })
+        db.update_device_status(matched["id"], "ready")
+        db.add_log(f"4.5G Telefon Ajanı bağlandı ve hazır: {device_id} ({client_ip})", level="INFO")
+        await ws_hub.broadcast("devices_changed", db.list_devices())
         await ws_hub.broadcast("system_state", system._build_state(app).model_dump())
         try:
             while True:
                 payload = await ws.receive_json()
                 agent_hub.handle_incoming(device_id, payload)
+                if "battery" in payload and payload["battery"] is not None:
+                    db.update_device_status(matched["id"], "ready", battery=int(payload["battery"]))
+                    await ws_hub.broadcast("devices_changed", db.list_devices())
         except WebSocketDisconnect:
             agent_hub.unregister(device_id)
+            db.update_device_status(matched["id"], "offline")
             db.add_log(f"4.5G Telefon Ajanı koptu: {device_id}", level="WARN")
+            await ws_hub.broadcast("devices_changed", db.list_devices())
             await ws_hub.broadcast("system_state", system._build_state(app).model_dump())
+
+    agent_dir = pathlib.Path(__file__).resolve().parents[2] / "agent"
+
+    @app.get("/setup")
+    @app.get("/setup_agent.sh")
+    async def serve_setup_script():
+        sh_file = agent_dir / "setup_agent.sh"
+        if sh_file.exists():
+            return FileResponse(sh_file, media_type="text/x-shellscript")
+        return FileResponse(agent_dir / "phone_agent.py")
+
+    @app.get("/agent/phone_agent.py")
+    async def serve_phone_agent():
+        py_file = agent_dir / "phone_agent.py"
+        if py_file.exists():
+            return FileResponse(py_file, media_type="text/x-python")
+        return FileResponse(agent_dir / "phone_agent.py")
 
     dist_dir = pathlib.Path(__file__).resolve().parents[2] / "web" / "dist"
     if dist_dir.exists():

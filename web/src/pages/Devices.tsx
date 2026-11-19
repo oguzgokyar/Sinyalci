@@ -11,6 +11,7 @@ export default function Devices() {
   const [calibratingKey, setCalibratingKey] = useState<string>("new_order_screen.buy_button");
   const [calibLog, setCalibLog] = useState<string>("");
   const [aoaStatus, setAoaStatus] = useState<string>("");
+  const [actionLog, setActionLog] = useState<string>("");
 
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -61,6 +62,17 @@ export default function Devices() {
       load();
     } catch (err: unknown) {
       setAoaStatus(`Hata: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const runClosePosition = async () => {
+    if (selectedId === null) return;
+    setActionLog("MT5 üzerinden pozisyon kapatılıyor...");
+    try {
+      await api.closeDevicePosition(selectedId);
+      setActionLog("✓ Pozisyon kapatma komutu iletildi.");
+    } catch (err: unknown) {
+      setActionLog(`Hata: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -168,6 +180,12 @@ export default function Devices() {
           <div className="text-xs font-semibold text-zinc-400 uppercase">Ekran & Kalibrasyon</div>
           <div className="flex gap-2">
             <button
+              onClick={runClosePosition}
+              className="px-2.5 py-1 bg-rose-950/80 hover:bg-rose-900 text-xs text-rose-300 font-medium rounded border border-rose-800/60"
+            >
+              Pozisyon Kapat
+            </button>
+            <button
               onClick={runAoaTest}
               className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 rounded"
             >
@@ -183,6 +201,7 @@ export default function Devices() {
         </div>
 
         {aoaStatus && <div className="text-xs mono text-emerald-400 bg-emerald-500/10 p-2 rounded">{aoaStatus}</div>}
+        {actionLog && <div className="text-xs mono text-amber-400 bg-amber-500/10 p-2 rounded">{actionLog}</div>}
 
         {/* Live screenshot container with click listener */}
         <div className="relative aspect-[720/1560] max-h-[520px] mx-auto bg-black rounded border border-zinc-800 overflow-hidden flex items-center justify-center">

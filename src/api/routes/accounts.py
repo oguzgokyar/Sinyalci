@@ -37,7 +37,7 @@ async def update_account(request: Request, account_id: int, body: AccountUpdate)
 @router.post("/{account_id}/sync-balance", response_model=AccountOut)
 async def sync_account_balance(request: Request, account_id: int):
     try:
-        acc = request.app.state.dm.sync_balance(account_id)
+        acc = await request.app.state.dm.sync_balance_async(account_id)
         await request.app.state.ws.broadcast("accounts_changed", request.app.state.db.list_accounts())
         return acc
     except Exception as exc:

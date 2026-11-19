@@ -16,9 +16,11 @@ from usb_trader.core.circuit_breaker import CircuitBreaker, ExecutionAbortedErro
 from usb_trader.core.executor import OrderLayout, TradeExecutor, TradeSignal
 from usb_trader.hardware.adb_driver import AdbTouchDriver
 from usb_trader.hardware.aoa_protocol import TOUCHSCREEN_HID_ID, build_touch_report
+from usb_trader.hardware.remote_agent_driver import RemoteAgentTouchDriver
 from usb_trader.hardware.usb_driver import AOAUSBDriver, find_usb_device
 from usb_trader.vision.adb_capture import AdbSnapshotSource
 from usb_trader.vision.ocr_verifier import OCRVerifier
+from usb_trader.vision.remote_agent_capture import RemoteAgentSnapshotSource
 from usb_trader.vision.state_machine import MTState, ScreenStateClassifier
 
 
@@ -28,9 +30,10 @@ def _find_bundled_adb() -> str:
 
 
 class DeviceManager:
-    def __init__(self, db: Any, ws_hub: Any) -> None:
+    def __init__(self, db: Any, ws_hub: Any, agent_hub: Optional[Any] = None) -> None:
         self.db = db
         self.ws = ws_hub
+        self.agent_hub = agent_hub
         self._locks: dict[int, asyncio.Lock] = {}
 
     def _get_lock(self, device_id: int) -> asyncio.Lock:
@@ -117,20 +120,80 @@ class DeviceManager:
             pass
         return None
 
+    def _find_agent_id(self, dev: dict[str, Any]) -> Optional[str]:
+        if not self.agent_hub:
+            return None
+        candidates = [
+            dev.get("serial") or "",
+            str(dev.get("id") or ""),
+            dev.get("name", "").lower().replace(" ", "_"),
+            "galaxy_a11",
+        ]
+        for c in candidates:
+            if c and self.agent_hub.is_connected(c):
+                return c
+        agents = self.agent_hub.list_agents()
+        if len(agents) == 1:
+            return str(agents[0]["device_id"])
+        return None
+
+    def get_driver_and_source(self, dev: dict[str, Any]) -> tuple[Any, Any, str]:
+        agent_id = self._find_agent_id(dev)
+        if agent_id:
+            drv = RemoteAgentTouchDriver(
+                agent_hub=self.agent_hub,
+                device_id=agent_id,
+                screen_width=dev.get("screen_width", 720),
+                screen_height=dev.get("screen_height", 1560),
+            )
+            src = RemoteAgentSnapshotSource(agent_hub=self.agent_hub, device_id=agent_id)
+            return drv, src, "remote_agent"
+        drv, mode = self._get_touch_driver(dev)
+        src = AdbSnapshotSource(adb_path=_find_bundled_adb(), serial=dev.get("serial"))
+        return drv, src, mode
+
+    async def capture_screen_async(self, device_id: int) -> tuple[np.ndarray, str]:
+        dev = self.db.get_device(device_id)
+        if not dev:
+            raise ValueError(f"Device {device_id} not found")
+        drv, src, mode = self.get_driver_and_source(dev)
+        if mode == "remote_agent":
+            await drv.wake_async()
+            frame = await src.grab_async()
+        else:
+            serial = dev.get("serial")
+            adb_bin = _find_bundled_adb()
+            try:
+                cmd = [adb_bin] + (["-s", serial] if serial else []) + ["shell", "input", "keyevent", "224"]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+            except Exception:
+                pass
+            frame = await asyncio.to_thread(src.grab)
+
+        captures_dir = pathlib.Path("captures")
+        captures_dir.mkdir(exist_ok=True)
+        filename = f"device_{device_id}_latest.png"
+        out_path = captures_dir / filename
+        cv2.imwrite(str(out_path), frame)
+        return frame, str(out_path)
+
     def capture_screen(self, device_id: int) -> tuple[np.ndarray, str]:
         dev = self.db.get_device(device_id)
         if not dev:
             raise ValueError(f"Device {device_id} not found")
-        serial = dev.get("serial")
-        adb_bin = _find_bundled_adb()
-        # Ensure screen is awake before grabbing frame
-        try:
-            cmd = [adb_bin] + (["-s", serial] if serial else []) + ["shell", "input", "keyevent", "224"]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
-        except Exception:
-            pass
-        src = AdbSnapshotSource(adb_path=adb_bin, serial=serial)
-        frame = src.grab()
+        drv, src, mode = self.get_driver_and_source(dev)
+        if mode == "remote_agent":
+            frame = src.grab()
+        else:
+            serial = dev.get("serial")
+            adb_bin = _find_bundled_adb()
+            try:
+                cmd = [adb_bin] + (["-s", serial] if serial else []) + ["shell", "input", "keyevent", "224"]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+            except Exception:
+                pass
+            frame = src.grab()
+
         captures_dir = pathlib.Path("captures")
         captures_dir.mkdir(exist_ok=True)
         filename = f"device_{device_id}_latest.png"
@@ -185,10 +248,29 @@ class DeviceManager:
             "aoa_v2",
         )
 
+    async def test_aoa_async(self, device_id: int) -> dict[str, Any]:
+        dev = self.db.get_device(device_id)
+        if not dev:
+            raise ValueError(f"Device {device_id} not found")
+        drv, src, mode = self.get_driver_and_source(dev)
+        if mode == "remote_agent":
+            await drv.tap_async(dev["screen_width"] // 2, dev["screen_height"] // 2, dwell_ms=85)
+            agent_id = self._find_agent_id(dev) or "galaxy_a11"
+            reply = await self.agent_hub.send_command(agent_id, "PING")
+            bat = reply.get("battery")
+            self.db.update_device_status(device_id, "ready", battery=bat, aoa_version=2)
+            return {"status": "ok", "mode": "remote_agent", "aoa_version": 2, "battery": bat}
+        return await asyncio.to_thread(self.test_aoa, device_id)
+
     def test_aoa(self, device_id: int) -> dict[str, Any]:
         dev = self.db.get_device(device_id)
         if not dev:
             raise ValueError(f"Device {device_id} not found")
+        drv, src, mode = self.get_driver_and_source(dev)
+        if mode == "remote_agent":
+            drv.tap(dev["screen_width"] // 2, dev["screen_height"] // 2, dwell_ms=85)
+            self.db.update_device_status(device_id, "ready", aoa_version=2)
+            return {"status": "ok", "mode": "remote_agent", "aoa_version": 2}
         try:
             vid = int(dev["usb_vid"], 16)
             pid = int(dev["usb_pid"], 16)
@@ -216,6 +298,53 @@ class DeviceManager:
                 self.db.update_device_status(device_id, "ready", battery=bat, aoa_version=2)
                 return {"status": "ok", "mode": "adb_touch", "aoa_version": 2}
             raise exc
+
+    async def close_position_async(self, device_id: int, symbol: Optional[str] = None) -> dict[str, Any]:
+        """Closes open position on MT5 mobile via Trade tab and context menu."""
+        dev = self.db.get_device(device_id)
+        if not dev:
+            raise ValueError(f"Device {device_id} not found")
+        prof_path = pathlib.Path(dev.get("profile_path") or "profiles/galaxy_a11_mt5.json")
+        prof = json.loads(prof_path.read_text(encoding="utf-8")) if prof_path.exists() else {}
+
+        drv, src, mode = self.get_driver_and_source(dev)
+        nav = prof.get("navigation", {})
+        t_tab = nav.get("tab_trade", [360, 1395])
+
+        # 1. Switch to Trade tab
+        if hasattr(drv, "tap_async"):
+            await drv.tap_async(t_tab[0], t_tab[1], dwell_ms=85)
+        else:
+            await asyncio.to_thread(drv.tap, t_tab[0], t_tab[1], 85)
+        await asyncio.sleep(0.9)
+
+        # 2. Long press on first position row
+        trade_scr = prof.get("trade_screen", {})
+        first_row = trade_scr.get("first_position_row", [360, 532])
+        if hasattr(drv, "swipe_async"):
+            await drv.swipe_async(first_row[0], first_row[1], first_row[0], first_row[1], duration_ms=900)
+        else:
+            await asyncio.to_thread(drv.tap, first_row[0], first_row[1], 900)
+        await asyncio.sleep(0.9)
+
+        # 3. Tap 'Pozisyonu Kapat' from context menu
+        ctx_close = trade_scr.get("context_close_position", [360, 1058])
+        if hasattr(drv, "tap_async"):
+            await drv.tap_async(ctx_close[0], ctx_close[1], dwell_ms=85)
+        else:
+            await asyncio.to_thread(drv.tap, ctx_close[0], ctx_close[1], 85)
+        await asyncio.sleep(1.2)
+
+        # 4. Tap 'Kapat' bottom button
+        close_btn = trade_scr.get("close_confirm_button", [360, 1434])
+        if hasattr(drv, "tap_async"):
+            await drv.tap_async(close_btn[0], close_btn[1], dwell_ms=95)
+        else:
+            await asyncio.to_thread(drv.tap, close_btn[0], close_btn[1], 95)
+        await asyncio.sleep(1.0)
+
+        self.db.add_log(f"Position close command executed on device #{device_id} ({symbol or 'first'})", level="INFO")
+        return {"status": "closed", "device_id": device_id, "symbol": symbol}
 
     def update_calibration(self, device_id: int, key: str, x: int, y: int) -> dict[str, Any]:
         dev = self.db.get_device(device_id)
@@ -347,8 +476,7 @@ class DeviceManager:
                 prof = json.loads(prof_path.read_text(encoding="utf-8"))
 
                 # Connect driver & frame source
-                drv, drv_mode = self._get_touch_driver(dev)
-                src = AdbSnapshotSource(adb_path=_find_bundled_adb(), serial=dev.get("serial"))
+                drv, src, drv_mode = self.get_driver_and_source(dev)
 
                 # Load template classifier
                 tmpl_dir = pathlib.Path("templates/galaxy_a11")
@@ -362,6 +490,10 @@ class DeviceManager:
                     lot_roi=tuple(prof["new_order_screen"]["lot_roi"]),
                     buy_button=tuple(prof["new_order_screen"]["buy_button"]),
                     sell_button=tuple(prof["new_order_screen"]["sell_button"]),
+                    sl_field=tuple(prof["new_order_screen"].get("sl_field", [187, 482])),
+                    sl_roi=tuple(prof["new_order_screen"].get("sl_roi", [110, 455, 260, 510])),
+                    tp_field=tuple(prof["new_order_screen"].get("tp_field", [534, 483])),
+                    tp_roi=tuple(prof["new_order_screen"].get("tp_roi", [460, 455, 610, 510])),
                 )
 
                 executor = TradeExecutor(
@@ -388,8 +520,10 @@ class DeviceManager:
                         symbol=order["symbol"],
                         side=order["side"],
                         lot=order["lot"],
+                        sl=order.get("sl"),
+                        tp=order.get("tp"),
                     )
-                    executor.execute(sig)
+                    await executor.execute_async(sig)
                 finally:
                     drv.close()
 

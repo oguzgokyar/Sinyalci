@@ -52,7 +52,8 @@ export const api = {
   addDevice: (body: { name: string; serial?: string | null; usb_vid: string; usb_pid: string }) =>
     req<Device>("/api/devices", { method: "POST", body: JSON.stringify(body) }),
   deleteDevice: (id: number) => req<{ deleted: boolean }>(`/api/devices/${id}`, { method: "DELETE" }),
-  testAoa: (id: number) => req<{ status: string; mode?: string; aoa_version: number }>(`/api/devices/${id}/test-aoa`, { method: "POST" }),
+  testAoa: (id: number) => req<{ status: string; mode?: string; aoa_version: number; battery?: number }>(`/api/devices/${id}/test-aoa`, { method: "POST" }),
+  closeDevicePosition: (id: number) => req<{ status: string; device_id: number }>(`/api/devices/${id}/close-position`, { method: "POST" }),
   calibrate: (id: number, key: string, x: number, y: number) =>
     req(`/api/devices/${id}/calibrate`, { method: "POST", body: JSON.stringify({ key, x, y }) }),
 
