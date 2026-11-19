@@ -129,6 +129,7 @@ class Database:
                 "strategy_symbol_suffix": ".us",
                 "strategy_auto_execute": "0",
                 "strategy_watchlist": "NVDA,AAPL,MSFT,TSLA,AMZN,META,GOOGL,AMD",
+                "strategy_favorites": "NVDA,AAPL,TSLA,MSFT,AMZN",
                 "strategy_max_daily_loss": "925.0",
             }
             for k, v in defaults.items():

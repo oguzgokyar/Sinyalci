@@ -19,6 +19,7 @@ class StrategyConfigUpdate(BaseModel):
     symbol_suffix: Optional[str] = None
     auto_execute: Optional[bool] = None
     watchlist: Optional[list[str]] = None
+    favorites: Optional[list[str]] = None
     max_daily_loss: Optional[float] = None
 
 

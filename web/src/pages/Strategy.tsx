@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { api, connectWS } from "../api";
-import type { StrategyConfig, StrategySignal, SignalStats } from "../types";
+import type { StrategyConfig, StrategySignal, SignalStats, AcdStock } from "../types";
 
 export default function Strategy() {
   const [config, setConfig] = useState<StrategyConfig | null>(null);
@@ -8,7 +8,8 @@ export default function Strategy() {
   const [stats, setStats] = useState<SignalStats>({ total: 0, executed: 0, pending: 0 });
   const [loading, setLoading] = useState(false);
   const [scanningTicker, setScanningTicker] = useState<string | null>(null);
-  const [customTicker, setCustomTicker] = useState("");
+  const [stockSearch, setStockSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
   // Form states
@@ -17,7 +18,7 @@ export default function Strategy() {
   const [minRR, setMinRR] = useState("2.0");
   const [suffix, setSuffix] = useState(".us");
   const [autoExec, setAutoExec] = useState(false);
-  const [watchlistInput, setWatchlistInput] = useState("");
+  const [favorites, setFavorites] = useState<string[]>(["NVDA", "AAPL", "TSLA", "MSFT", "AMZN"]);
 
   const showToast = (msg: string, type: "ok" | "err" = "ok") => {
     setToast({ msg, type });
@@ -37,7 +38,7 @@ export default function Strategy() {
       setMinRR(String(cfg.min_rr));
       setSuffix(cfg.symbol_suffix);
       setAutoExec(cfg.auto_execute);
-      setWatchlistInput(cfg.watchlist.join(", "));
+      setFavorites(cfg.favorites || ["NVDA", "AAPL", "TSLA", "MSFT", "AMZN"]);
     } catch (e: any) {
       showToast("Veri yüklenemedi: " + (e?.message || e), "err");
     } finally {
@@ -64,26 +65,38 @@ export default function Strategy() {
     return unsub;
   }, []);
 
-  const handleSaveConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveConfig = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     try {
-      const wl = watchlistInput
-        .split(",")
-        .map((s) => s.trim().toUpperCase())
-        .filter(Boolean);
-
       const updated = await api.updateStrategyConfig({
         balance: parseFloat(balance),
         risk_percent: parseFloat(riskPct),
         min_rr: parseFloat(minRR),
         symbol_suffix: suffix,
         auto_execute: autoExec,
-        watchlist: wl,
+        favorites: favorites,
+        watchlist: favorites,
       });
       setConfig(updated);
-      showToast("Strateji ayarları başarıyla kaydedildi.");
+      showToast("Strateji ve Favori Hisse ayarları kaydedildi.");
     } catch (e: any) {
       showToast("Kaydetme hatası: " + (e?.message || e), "err");
+    }
+  };
+
+  const toggleFavorite = async (ticker: string) => {
+    const isFav = favorites.includes(ticker);
+    const next = isFav ? favorites.filter((t) => t !== ticker) : [...favorites, ticker];
+    setFavorites(next);
+    try {
+      const updated = await api.updateStrategyConfig({
+        favorites: next,
+        watchlist: next,
+      });
+      setConfig(updated);
+      showToast(`${ticker} ${isFav ? "favorilerden çıkarıldı" : "favorilere eklendi"}!`);
+    } catch (e: any) {
+      showToast("Favori güncellenemedi: " + (e?.message || e), "err");
     }
   };
 
@@ -123,8 +136,26 @@ export default function Strategy() {
     }
   };
 
+  // Categories extraction
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    (config?.acd_stocks || []).forEach((s) => set.add(s.category));
+    return ["ALL", ...Array.from(set)];
+  }, [config?.acd_stocks]);
+
+  // Filtered ACD Markets stocks
+  const filteredStocks = useMemo(() => {
+    return (config?.acd_stocks || []).filter((s) => {
+      const matchSearch =
+        s.ticker.toLowerCase().includes(stockSearch.toLowerCase()) ||
+        s.name.toLowerCase().includes(stockSearch.toLowerCase());
+      const matchCat = selectedCategory === "ALL" || s.category === selectedCategory;
+      return matchSearch && matchCat;
+    });
+  }, [config?.acd_stocks, stockSearch, selectedCategory]);
+
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="space-y-6">
       {/* Toast Notification */}
       {toast && (
         <div
@@ -144,14 +175,14 @@ export default function Strategy() {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.7)]" />
-              ACD Markets Günlük Trade Stratejisi
+              ACD Markets Günlük / 1-4 Saatlik Trade Stratejisi
             </h1>
             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
               1:2 R:R Pullback to Value
             </span>
           </div>
           <p className="text-xs text-zinc-400 mt-1">
-            46.250$ başlangıç bakiyesi ile %1 sabit risk (462,50$) kuralı ve TradingAgents LLM motoru destekli swing işlem yönetimi.
+            ACD Markets hisse CFD evreni, favori hisse izleme listesi ve TradingAgents LLM motoruyla dinamik lot & kasa yönetimi.
           </p>
         </div>
 
@@ -193,11 +224,11 @@ export default function Strategy() {
         </div>
 
         <div className="bg-zinc-900/80 border border-zinc-800/80 p-4 rounded-xl">
-          <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Günlük Fren Limiti</div>
+          <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Favori Hisseler</div>
           <div className="text-xl font-bold text-amber-400 mt-1 font-mono">
-            ${Number(config?.max_daily_loss || 925).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            {favorites.length} Hisse
           </div>
-          <div className="text-[10px] text-zinc-500 mt-1">2 Stop Sonrası Kilitleme</div>
+          <div className="text-[10px] text-zinc-500 mt-1">Aktif İzleme Listesi</div>
         </div>
 
         <div className="bg-zinc-900/80 border border-zinc-800/80 p-4 rounded-xl">
@@ -209,12 +240,165 @@ export default function Strategy() {
         </div>
       </div>
 
-      {/* Main Grid: Config vs Watchlist Scanning */}
+      {/* SECTION 1: FAVORITES & QUICK ANALYSIS */}
+      <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div>
+            <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+              ⭐ Favori Hisseler & Hızlı Analiz
+            </h2>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Seçtiğiniz favori hisseler burada yer alır. Tek tıkla 1-4 saatlik TradingAgents analizini başlatabilirsiniz.
+            </p>
+          </div>
+
+          {scanningTicker && (
+            <span className="text-xs text-cyan-400 flex items-center gap-1.5 animate-pulse font-mono bg-cyan-950/40 border border-cyan-800/60 px-3 py-1 rounded-lg">
+              <span className="w-2 h-2 rounded-full bg-cyan-400" />
+              {scanningTicker} analiz ediliyor... (1-2 dk)
+            </span>
+          )}
+        </div>
+
+        {favorites.length === 0 ? (
+          <div className="text-center py-8 text-zinc-500 text-xs border border-dashed border-zinc-800 rounded-lg">
+            Henüz favori hisse seçilmedi. Aşağıdaki "ACD Markets Hisse Kataloğu" bölümünden yıldız ikonuna tıklayarak favorilerinizi belirleyebilirsiniz.
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {favorites.map((ticker) => {
+              const stock = (config?.acd_stocks || []).find((s) => s.ticker === ticker);
+              const isScanning = scanningTicker === ticker;
+              return (
+                <div
+                  key={ticker}
+                  className={`p-3.5 rounded-xl border transition flex flex-col justify-between ${
+                    isScanning
+                      ? "bg-cyan-950/30 border-cyan-500 shadow-[0_0_12px_rgba(34,211,238,0.2)]"
+                      : "bg-zinc-950 border-zinc-800 hover:border-zinc-700"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-1">
+                    <div>
+                      <span className="font-extrabold text-zinc-100 font-mono text-base block">{ticker}</span>
+                      <span className="text-[10px] text-zinc-400 line-clamp-1" title={stock?.name}>
+                        {stock?.name || ticker}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => toggleFavorite(ticker)}
+                      title="Favorilerden Kaldır"
+                      className="text-amber-400 hover:text-amber-300 text-base leading-none"
+                    >
+                      ★
+                    </button>
+                  </div>
+
+                  <div className="mt-3 pt-2.5 border-t border-zinc-900 flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-zinc-500">{ticker}{config?.symbol_suffix}</span>
+                    <button
+                      onClick={() => handleScan(ticker)}
+                      disabled={scanningTicker !== null}
+                      className="px-2.5 py-1 rounded text-[11px] font-semibold bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 transition disabled:opacity-40"
+                    >
+                      {isScanning ? "..." : "Analiz Et"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* SECTION 2: ACD MARKETS FULL STOCK CATALOG */}
+      <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+              🏛️ Tüm ACD Markets Hisseleri ({config?.acd_stocks?.length || 0})
+            </h2>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Hisselerin yanındaki yıldıza tıklayarak yukarıdaki Hızlı Analiz ve İzleme Listesi'ne ekleyip çıkarabilirsiniz.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              placeholder="Hisse veya Şirket Ara..."
+              value={stockSearch}
+              onChange={(e) => setStockSearch(e.target.value)}
+              className="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none focus:border-cyan-500 w-48"
+            />
+
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-cyan-500"
+            >
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c === "ALL" ? "Tüm Sektörler" : c}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Stock List Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 max-h-72 overflow-y-auto pr-1">
+          {filteredStocks.map((stock) => {
+            const isFav = favorites.includes(stock.ticker);
+            return (
+              <div
+                key={stock.ticker}
+                className={`px-3 py-2.5 rounded-lg border flex items-center justify-between transition ${
+                  isFav
+                    ? "bg-amber-950/15 border-amber-500/30"
+                    : "bg-zinc-950/60 border-zinc-800/70 hover:border-zinc-700"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <button
+                    onClick={() => toggleFavorite(stock.ticker)}
+                    className={`text-base leading-none transition ${
+                      isFav ? "text-amber-400 hover:text-amber-300" : "text-zinc-600 hover:text-zinc-400"
+                    }`}
+                    title={isFav ? "Favorilerden Kaldır" : "Favorilere Ekle"}
+                  >
+                    ★
+                  </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-xs text-zinc-100 font-mono">{stock.ticker}</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">({stock.category})</span>
+                    </div>
+                    <div className="text-[10px] text-zinc-400 truncate" title={stock.name}>
+                      {stock.name}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleScan(stock.ticker)}
+                  disabled={scanningTicker !== null}
+                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition disabled:opacity-40 ml-2 shrink-0"
+                >
+                  Analiz
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* SECTION 3: CONFIG & GENERATED SIGNALS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 1 Col: Strategy Settings Form */}
         <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5 space-y-4">
           <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
-            ⚙️ Kasa & Risk Parametreleri
+            ⚙️ Kasa & Parametre Ayarları
           </h2>
 
           <form onSubmit={handleSaveConfig} className="space-y-4">
@@ -254,7 +438,7 @@ export default function Strategy() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Broker Sembol Eki (Suffix)</label>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">ACD Broker Sembol Eki (Suffix)</label>
               <input
                 type="text"
                 placeholder=".us veya # veya boş"
@@ -263,16 +447,6 @@ export default function Strategy() {
                 className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 font-mono focus:outline-none focus:border-cyan-500"
               />
               <span className="text-[10px] text-zinc-500 mt-1 block">Örn: NVDA + .us = NVDA.us</span>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">İzleme Listesi (Watchlist)</label>
-              <textarea
-                rows={2}
-                value={watchlistInput}
-                onChange={(e) => setWatchlistInput(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 font-mono focus:outline-none focus:border-cyan-500 resize-none"
-              />
             </div>
 
             <div className="pt-2 border-t border-zinc-800">
@@ -284,7 +458,7 @@ export default function Strategy() {
                   className="w-4 h-4 rounded bg-zinc-950 border-zinc-700 text-cyan-500 focus:ring-0"
                 />
                 <span className="text-xs text-zinc-300 font-medium">
-                  Otomatik İcra (Sinyal üretilince beklemeden emri MT5'e gönder)
+                  Otomatik İcra (Sinyal onay beklemeden doğrudan MT5'e gitsin)
                 </span>
               </label>
             </div>
@@ -298,60 +472,8 @@ export default function Strategy() {
           </form>
         </div>
 
-        {/* Right 2 Cols: Watchlist Quick Scan & Active Scanner */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Quick Scanner Bar */}
-          <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5">
-            <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider mb-3 flex items-center justify-between">
-              <span>🚀 Çoklu Ajan Taraması (TradingAgents)</span>
-              {scanningTicker && (
-                <span className="text-xs text-cyan-400 flex items-center gap-1.5 animate-pulse font-mono">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                  {scanningTicker} analiz ediliyor... (1-2 dk)
-                </span>
-              )}
-            </h2>
-
-            <div className="flex flex-wrap gap-2 mb-4">
-              {(config?.watchlist || []).map((ticker) => (
-                <button
-                  key={ticker}
-                  onClick={() => handleScan(ticker)}
-                  disabled={scanningTicker !== null}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition flex items-center gap-1.5 ${
-                    scanningTicker === ticker
-                      ? "bg-cyan-500/20 border-cyan-500 text-cyan-300 animate-pulse"
-                      : "bg-zinc-800/80 border-zinc-700/80 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-600"
-                  }`}
-                >
-                  <span>{ticker}</span>
-                  <span className="text-[10px] text-zinc-500 font-normal">Tara</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 pt-3 border-t border-zinc-800/80">
-              <input
-                type="text"
-                placeholder="Özel Sembol (örn: PLTR, NFLX, BABA)"
-                value={customTicker}
-                onChange={(e) => setCustomTicker(e.target.value.toUpperCase())}
-                className="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none focus:border-cyan-500"
-              />
-              <button
-                onClick={() => {
-                  handleScan(customTicker);
-                  setCustomTicker("");
-                }}
-                disabled={!customTicker || scanningTicker !== null}
-                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-600 transition disabled:opacity-50"
-              >
-                Analiz Et
-              </button>
-            </div>
-          </div>
-
-          {/* Active Signals Stream */}
+        {/* Right 2 Cols: Active Signals Stream */}
+        <div className="lg:col-span-2">
           <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5">
             <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider mb-4 flex items-center justify-between">
               <span>📊 Üretilen Strateji Sinyalleri</span>
@@ -360,7 +482,7 @@ export default function Strategy() {
 
             {signals.length === 0 ? (
               <div className="text-center py-12 text-zinc-500 text-xs">
-                Henüz sinyal üretilmedi. Yukarıdan bir hisse seçerek tarama başlatabilirsiniz.
+                Henüz sinyal üretilmedi. Favori listenizdeki bir hisseye tıklayarak analiz başlatabilirsiniz.
               </div>
             ) : (
               <div className="space-y-3.5">

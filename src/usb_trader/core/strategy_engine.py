@@ -22,6 +22,58 @@ from typing import Any, Optional
 logger = logging.getLogger("sinyalci.strategy")
 
 
+# Canonical ACD Markets Stock CFD Universe
+ACD_MARKETS_STOCKS: list[dict[str, str]] = [
+    # US Mega-Cap / Tech Leaders
+    {"ticker": "NVDA", "name": "NVIDIA Corporation", "category": "Tech / AI"},
+    {"ticker": "AAPL", "name": "Apple Inc.", "category": "Tech / Consumer"},
+    {"ticker": "MSFT", "name": "Microsoft Corporation", "category": "Tech / Cloud"},
+    {"ticker": "TSLA", "name": "Tesla, Inc.", "category": "EV / Auto"},
+    {"ticker": "AMZN", "name": "Amazon.com, Inc.", "category": "E-Commerce / Cloud"},
+    {"ticker": "META", "name": "Meta Platforms, Inc.", "category": "Tech / Social"},
+    {"ticker": "GOOGL", "name": "Alphabet Inc. (Google)", "category": "Tech / Search"},
+    {"ticker": "AMD", "name": "Advanced Micro Devices", "category": "Semiconductors"},
+    {"ticker": "INTC", "name": "Intel Corporation", "category": "Semiconductors"},
+    {"ticker": "QCOM", "name": "Qualcomm Incorporated", "category": "Semiconductors"},
+    {"ticker": "AVGO", "name": "Broadcom Inc.", "category": "Semiconductors"},
+    {"ticker": "NFLX", "name": "Netflix, Inc.", "category": "Entertainment"},
+    {"ticker": "PLTR", "name": "Palantir Technologies", "category": "AI / Enterprise"},
+    {"ticker": "ORCL", "name": "Oracle Corporation", "category": "Tech / Enterprise"},
+    {"ticker": "CRM", "name": "Salesforce, Inc.", "category": "SaaS / Cloud"},
+    {"ticker": "ADBE", "name": "Adobe Inc.", "category": "Software"},
+    {"ticker": "COIN", "name": "Coinbase Global, Inc.", "category": "Fintech / Crypto"},
+    {"ticker": "PYPL", "name": "PayPal Holdings, Inc.", "category": "Fintech"},
+    {"ticker": "SQ", "name": "Block, Inc.", "category": "Fintech"},
+    {"ticker": "UBER", "name": "Uber Technologies, Inc.", "category": "Mobility"},
+    {"ticker": "ABNB", "name": "Airbnb, Inc.", "category": "Travel / Consumer"},
+    # Finance & Banking
+    {"ticker": "JPM", "name": "JPMorgan Chase & Co.", "category": "Banking / Finance"},
+    {"ticker": "BAC", "name": "Bank of America Corporation", "category": "Banking / Finance"},
+    {"ticker": "GS", "name": "The Goldman Sachs Group", "category": "Investment Banking"},
+    {"ticker": "MS", "name": "Morgan Stanley", "category": "Investment Banking"},
+    {"ticker": "V", "name": "Visa Inc.", "category": "Payments"},
+    {"ticker": "MA", "name": "Mastercard Incorporated", "category": "Payments"},
+    # Energy & Industrial
+    {"ticker": "XOM", "name": "Exxon Mobil Corporation", "category": "Energy / Oil"},
+    {"ticker": "CVX", "name": "Chevron Corporation", "category": "Energy / Oil"},
+    {"ticker": "BA", "name": "The Boeing Company", "category": "Aerospace"},
+    {"ticker": "CAT", "name": "Caterpillar Inc.", "category": "Industrial"},
+    # Healthcare & Pharma
+    {"ticker": "PFE", "name": "Pfizer Inc.", "category": "Healthcare / Pharma"},
+    {"ticker": "JNJ", "name": "Johnson & Johnson", "category": "Healthcare / Pharma"},
+    {"ticker": "LLY", "name": "Eli Lilly and Company", "category": "Healthcare / Pharma"},
+    # Retail & Consumer Goods
+    {"ticker": "WMT", "name": "Walmart Inc.", "category": "Retail"},
+    {"ticker": "COST", "name": "Costco Wholesale Corporation", "category": "Retail"},
+    {"ticker": "NKE", "name": "NIKE, Inc.", "category": "Consumer Discretionary"},
+    {"ticker": "KO", "name": "The Coca-Cola Company", "category": "Consumer Staples"},
+    {"ticker": "PEP", "name": "PepsiCo, Inc.", "category": "Consumer Staples"},
+    {"ticker": "MCD", "name": "McDonald's Corporation", "category": "Restaurants"},
+    {"ticker": "SBUX", "name": "Starbucks Corporation", "category": "Restaurants"},
+    {"ticker": "DIS", "name": "The Walt Disney Company", "category": "Entertainment"},
+]
+
+
 class StrategyEngine:
     def __init__(self, db: Any, tradingagents_url: Optional[str] = None) -> None:
         self.db = db
@@ -40,6 +92,8 @@ class StrategyEngine:
         auto_exec = self.db.get_setting("strategy_auto_execute", "0") == "1"
         watchlist_raw = self.db.get_setting("strategy_watchlist", "NVDA,AAPL,MSFT,TSLA,AMZN,META,GOOGL,AMD")
         watchlist = [t.strip().upper() for t in watchlist_raw.split(",") if t.strip()]
+        favorites_raw = self.db.get_setting("strategy_favorites", "NVDA,AAPL,TSLA,MSFT,AMZN")
+        favorites = [t.strip().upper() for t in favorites_raw.split(",") if t.strip()]
         max_daily_loss = float(self.db.get_setting("strategy_max_daily_loss", "925.0"))
 
         risk_amount = round(balance * (risk_pct / 100.0), 2)
@@ -54,6 +108,8 @@ class StrategyEngine:
             "symbol_suffix": suffix,
             "auto_execute": auto_exec,
             "watchlist": watchlist,
+            "favorites": favorites,
+            "acd_stocks": ACD_MARKETS_STOCKS,
             "max_daily_loss": max_daily_loss,
             "tradingagents_url": self.tradingagents_url,
         }
@@ -74,6 +130,11 @@ class StrategyEngine:
                 self.db.set_setting("strategy_watchlist", ",".join(data["watchlist"]))
             else:
                 self.db.set_setting("strategy_watchlist", str(data["watchlist"]))
+        if "favorites" in data:
+            if isinstance(data["favorites"], list):
+                self.db.set_setting("strategy_favorites", ",".join(data["favorites"]))
+            else:
+                self.db.set_setting("strategy_favorites", str(data["favorites"]))
         if "max_daily_loss" in data:
             self.db.set_setting("strategy_max_daily_loss", str(float(data["max_daily_loss"])))
 

@@ -148,6 +148,12 @@ export interface AuditLog {
   created_at: string;
 }
 
+export interface AcdStock {
+  ticker: string;
+  name: string;
+  category: string;
+}
+
 export interface StrategyConfig {
   balance: number;
   risk_percent: number;
@@ -157,6 +163,8 @@ export interface StrategyConfig {
   symbol_suffix: string;
   auto_execute: boolean;
   watchlist: string[];
+  favorites: string[];
+  acd_stocks: AcdStock[];
   max_daily_loss: number;
   tradingagents_url: string;
 }
