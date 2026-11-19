@@ -22,55 +22,54 @@ from typing import Any, Optional
 logger = logging.getLogger("sinyalci.strategy")
 
 
-# Canonical ACD Markets Stock CFD Universe
-ACD_MARKETS_STOCKS: list[dict[str, str]] = [
-    # US Mega-Cap / Tech Leaders
-    {"ticker": "NVDA", "name": "NVIDIA Corporation", "category": "Tech / AI"},
-    {"ticker": "AAPL", "name": "Apple Inc.", "category": "Tech / Consumer"},
-    {"ticker": "MSFT", "name": "Microsoft Corporation", "category": "Tech / Cloud"},
-    {"ticker": "TSLA", "name": "Tesla, Inc.", "category": "EV / Auto"},
-    {"ticker": "AMZN", "name": "Amazon.com, Inc.", "category": "E-Commerce / Cloud"},
-    {"ticker": "META", "name": "Meta Platforms, Inc.", "category": "Tech / Social"},
-    {"ticker": "GOOGL", "name": "Alphabet Inc. (Google)", "category": "Tech / Search"},
-    {"ticker": "AMD", "name": "Advanced Micro Devices", "category": "Semiconductors"},
-    {"ticker": "INTC", "name": "Intel Corporation", "category": "Semiconductors"},
-    {"ticker": "QCOM", "name": "Qualcomm Incorporated", "category": "Semiconductors"},
-    {"ticker": "AVGO", "name": "Broadcom Inc.", "category": "Semiconductors"},
-    {"ticker": "NFLX", "name": "Netflix, Inc.", "category": "Entertainment"},
-    {"ticker": "PLTR", "name": "Palantir Technologies", "category": "AI / Enterprise"},
-    {"ticker": "ORCL", "name": "Oracle Corporation", "category": "Tech / Enterprise"},
-    {"ticker": "CRM", "name": "Salesforce, Inc.", "category": "SaaS / Cloud"},
-    {"ticker": "ADBE", "name": "Adobe Inc.", "category": "Software"},
-    {"ticker": "COIN", "name": "Coinbase Global, Inc.", "category": "Fintech / Crypto"},
-    {"ticker": "PYPL", "name": "PayPal Holdings, Inc.", "category": "Fintech"},
-    {"ticker": "SQ", "name": "Block, Inc.", "category": "Fintech"},
-    {"ticker": "UBER", "name": "Uber Technologies, Inc.", "category": "Mobility"},
-    {"ticker": "ABNB", "name": "Airbnb, Inc.", "category": "Travel / Consumer"},
-    # Finance & Banking
-    {"ticker": "JPM", "name": "JPMorgan Chase & Co.", "category": "Banking / Finance"},
-    {"ticker": "BAC", "name": "Bank of America Corporation", "category": "Banking / Finance"},
-    {"ticker": "GS", "name": "The Goldman Sachs Group", "category": "Investment Banking"},
-    {"ticker": "MS", "name": "Morgan Stanley", "category": "Investment Banking"},
-    {"ticker": "V", "name": "Visa Inc.", "category": "Payments"},
-    {"ticker": "MA", "name": "Mastercard Incorporated", "category": "Payments"},
-    # Energy & Industrial
-    {"ticker": "XOM", "name": "Exxon Mobil Corporation", "category": "Energy / Oil"},
-    {"ticker": "CVX", "name": "Chevron Corporation", "category": "Energy / Oil"},
-    {"ticker": "BA", "name": "The Boeing Company", "category": "Aerospace"},
-    {"ticker": "CAT", "name": "Caterpillar Inc.", "category": "Industrial"},
-    # Healthcare & Pharma
-    {"ticker": "PFE", "name": "Pfizer Inc.", "category": "Healthcare / Pharma"},
-    {"ticker": "JNJ", "name": "Johnson & Johnson", "category": "Healthcare / Pharma"},
-    {"ticker": "LLY", "name": "Eli Lilly and Company", "category": "Healthcare / Pharma"},
-    # Retail & Consumer Goods
-    {"ticker": "WMT", "name": "Walmart Inc.", "category": "Retail"},
-    {"ticker": "COST", "name": "Costco Wholesale Corporation", "category": "Retail"},
-    {"ticker": "NKE", "name": "NIKE, Inc.", "category": "Consumer Discretionary"},
-    {"ticker": "KO", "name": "The Coca-Cola Company", "category": "Consumer Staples"},
-    {"ticker": "PEP", "name": "PepsiCo, Inc.", "category": "Consumer Staples"},
-    {"ticker": "MCD", "name": "McDonald's Corporation", "category": "Restaurants"},
-    {"ticker": "SBUX", "name": "Starbucks Corporation", "category": "Restaurants"},
-    {"ticker": "DIS", "name": "The Walt Disney Company", "category": "Entertainment"},
+# Canonical ACG Markets MT5 Universe (Forex, Metals, Indices, Energy)
+ACG_MARKETS_SYMBOLS: list[dict[str, str]] = [
+    # Top Picks / Majors & Metals
+    {"ticker": "XAUUSD", "name": "Gold / US Dollar", "category": "Metals (Altın)"},
+    {"ticker": "EURUSD", "name": "Euro / US Dollar", "category": "Forex Majors"},
+    {"ticker": "GBPUSD", "name": "British Pound / US Dollar", "category": "Forex Majors"},
+    {"ticker": "USDJPY", "name": "US Dollar / Japanese Yen", "category": "Forex Majors"},
+    {"ticker": "NAS100", "name": "Nasdaq 100 Index", "category": "Indices (Endeks)"},
+    {"ticker": "US30", "name": "Dow Jones Industrial Average", "category": "Indices (Endeks)"},
+    {"ticker": "US500", "name": "S&P 500 Index", "category": "Indices (Endeks)"},
+    {"ticker": "USDCAD", "name": "US Dollar / Canadian Dollar", "category": "Forex Majors"},
+    {"ticker": "USDCHF", "name": "US Dollar / Swiss Franc", "category": "Forex Majors"},
+    {"ticker": "AUDUSD", "name": "Australian Dollar / US Dollar", "category": "Forex Majors"},
+    {"ticker": "NZDUSD", "name": "New Zealand Dollar / US Dollar", "category": "Forex Majors"},
+    {"ticker": "XAGUSD", "name": "Silver / US Dollar", "category": "Metals (Gümüş)"},
+    {"ticker": "USOIL", "name": "WTI Crude Oil", "category": "Energy (Petrol)"},
+    {"ticker": "UKOIL", "name": "Brent Crude Oil", "category": "Energy (Petrol)"},
+    # Euro Crosses
+    {"ticker": "EURGBP", "name": "Euro / British Pound", "category": "Forex Euro Crosses"},
+    {"ticker": "EURJPY", "name": "Euro / Japanese Yen", "category": "Forex Euro Crosses"},
+    {"ticker": "EURAUD", "name": "Euro / Australian Dollar", "category": "Forex Euro Crosses"},
+    {"ticker": "EURCAD", "name": "Euro / Canadian Dollar", "category": "Forex Euro Crosses"},
+    {"ticker": "EURCHF", "name": "Euro / Swiss Franc", "category": "Forex Euro Crosses"},
+    {"ticker": "EURNZD", "name": "Euro / New Zealand Dollar", "category": "Forex Euro Crosses"},
+    # Pound Crosses
+    {"ticker": "GBPJPY", "name": "British Pound / Japanese Yen", "category": "Forex GBP Crosses"},
+    {"ticker": "GBPAUD", "name": "British Pound / Australian Dollar", "category": "Forex GBP Crosses"},
+    {"ticker": "GBPCAD", "name": "British Pound / Canadian Dollar", "category": "Forex GBP Crosses"},
+    {"ticker": "GBPCHF", "name": "British Pound / Swiss Franc", "category": "Forex GBP Crosses"},
+    {"ticker": "GBPNZD", "name": "British Pound / New Zealand Dollar", "category": "Forex GBP Crosses"},
+    {"ticker": "GBPSGD", "name": "British Pound / Singapore Dollar", "category": "Forex GBP Crosses"},
+    # Other Crosses
+    {"ticker": "AUDCAD", "name": "Australian Dollar / Canadian Dollar", "category": "Forex Crosses"},
+    {"ticker": "AUDCHF", "name": "Australian Dollar / Swiss Franc", "category": "Forex Crosses"},
+    {"ticker": "AUDJPY", "name": "Australian Dollar / Japanese Yen", "category": "Forex Crosses"},
+    {"ticker": "AUDNZD", "name": "Australian Dollar / New Zealand Dollar", "category": "Forex Crosses"},
+    {"ticker": "CADCHF", "name": "Canadian Dollar / Swiss Franc", "category": "Forex Crosses"},
+    {"ticker": "CADJPY", "name": "Canadian Dollar / Japanese Yen", "category": "Forex Crosses"},
+    {"ticker": "CHFJPY", "name": "Swiss Franc / Japanese Yen", "category": "Forex Crosses"},
+    {"ticker": "NZDCAD", "name": "New Zealand Dollar / Canadian Dollar", "category": "Forex Crosses"},
+    {"ticker": "NZDCHF", "name": "New Zealand Dollar / Swiss Franc", "category": "Forex Crosses"},
+    {"ticker": "NZDJPY", "name": "New Zealand Dollar / Japanese Yen", "category": "Forex Crosses"},
+    # Global Indices
+    {"ticker": "GER30", "name": "Germany 40 / DAX", "category": "Indices (Endeks)"},
+    {"ticker": "UK100", "name": "UK 100 / FTSE", "category": "Indices (Endeks)"},
+    {"ticker": "JPN225", "name": "Japan 225 / Nikkei", "category": "Indices (Endeks)"},
+    {"ticker": "EUSTX50", "name": "Euro Stoxx 50", "category": "Indices (Endeks)"},
+    {"ticker": "HK50", "name": "Hong Kong 50 / Hang Seng", "category": "Indices (Endeks)"},
 ]
 
 
@@ -88,11 +87,11 @@ class StrategyEngine:
         balance = float(self.db.get_setting("strategy_balance", "46250.0"))
         risk_pct = float(self.db.get_setting("strategy_risk_percent", "1.0"))
         min_rr = float(self.db.get_setting("strategy_min_rr", "2.0"))
-        suffix = self.db.get_setting("strategy_symbol_suffix", ".us")
+        suffix = self.db.get_setting("strategy_symbol_suffix", ".pro")
         auto_exec = self.db.get_setting("strategy_auto_execute", "0") == "1"
-        watchlist_raw = self.db.get_setting("strategy_watchlist", "NVDA,AAPL,MSFT,TSLA,AMZN,META,GOOGL,AMD")
+        watchlist_raw = self.db.get_setting("strategy_watchlist", "XAUUSD,EURUSD,GBPUSD,USDJPY,NAS100")
         watchlist = [t.strip().upper() for t in watchlist_raw.split(",") if t.strip()]
-        favorites_raw = self.db.get_setting("strategy_favorites", "NVDA,AAPL,TSLA,MSFT,AMZN")
+        favorites_raw = self.db.get_setting("strategy_favorites", "XAUUSD,EURUSD,GBPUSD,USDJPY,NAS100")
         favorites = [t.strip().upper() for t in favorites_raw.split(",") if t.strip()]
         max_daily_loss = float(self.db.get_setting("strategy_max_daily_loss", "925.0"))
 
@@ -109,7 +108,7 @@ class StrategyEngine:
             "auto_execute": auto_exec,
             "watchlist": watchlist,
             "favorites": favorites,
-            "acd_stocks": ACD_MARKETS_STOCKS,
+            "acg_symbols": ACG_MARKETS_SYMBOLS,
             "max_daily_loss": max_daily_loss,
             "tradingagents_url": self.tradingagents_url,
         }
@@ -140,7 +139,7 @@ class StrategyEngine:
 
         return self.get_config()
 
-    def calculate_lot(self, entry_price: float, stop_loss: float, balance: Optional[float] = None, risk_pct: Optional[float] = None) -> tuple[float, float]:
+    def calculate_lot(self, ticker: str, entry_price: float, stop_loss: float, balance: Optional[float] = None, risk_pct: Optional[float] = None) -> tuple[float, float]:
         cfg = self.get_config()
         bal = balance if balance is not None else cfg["balance"]
         rp = risk_pct if risk_pct is not None else cfg["risk_percent"]
@@ -150,9 +149,28 @@ class StrategyEngine:
         if sl_distance <= 0:
             return 0.1, risk_amount
 
-        # For stock CFDs, standard contract size is 1 share per lot (or CFD unit)
-        raw_lot = risk_amount / sl_distance
-        # Round to 2 decimal places (standard MT5 step 0.01 lot)
+        t = ticker.upper()
+        # Forex (100,000 units), Gold (100 oz), Indices (1-10 contracts)
+        if t in ["XAUUSD", "GOLD"]:
+            # Gold: 1 Lot = 100 oz. 1 dollar move = $100 per lot
+            raw_lot = risk_amount / (sl_distance * 100.0)
+        elif t in ["XAGUSD", "SILVER"]:
+            # Silver: 1 Lot = 5000 oz.
+            raw_lot = risk_amount / (sl_distance * 5000.0)
+        elif any(t.startswith(prefix) or t.endswith(prefix) for prefix in ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]):
+            # Standard Forex: 1 Lot = 100,000 units. Pip = 0.0001 (or 0.01 for JPY)
+            is_jpy = "JPY" in t
+            pip_size = 0.01 if is_jpy else 0.0001
+            pips_at_risk = sl_distance / pip_size
+            pip_value_per_lot = 10.0  # Approx $10 per pip for standard 1.00 lot
+            raw_lot = risk_amount / (pips_at_risk * pip_value_per_lot) if pips_at_risk > 0 else 0.1
+        elif t in ["NAS100", "US30", "US500", "GER30", "UK100", "JPN225"]:
+            # Index CFDs: Typically 1 point = $1-$20 per lot
+            point_value = 1.0
+            raw_lot = risk_amount / (sl_distance * point_value)
+        else:
+            raw_lot = risk_amount / sl_distance
+
         calculated_lot = round(raw_lot, 2)
         if calculated_lot < 0.01:
             calculated_lot = 0.01
@@ -264,9 +282,9 @@ class StrategyEngine:
         if side == "BUY":
             tp = round(entry_price + (sl_distance * min_rr), 2)
         else:
-            tp = round(entry_price - (sl_distance * min_rr), 2)
+            tp = round(entry_price - (sl_distance * min_rr), 4)
 
-        calculated_lot, risk_amount = self.calculate_lot(entry_price, sl)
+        calculated_lot, risk_amount = self.calculate_lot(ticker, entry_price, sl)
         broker_symbol = self.format_broker_symbol(ticker)
         reasoning = reason_match.group(1).strip() if reason_match else f"{ticker} TradingAgents çoklu ajan analizi tamamlandı."
 

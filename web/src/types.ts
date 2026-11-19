@@ -148,7 +148,7 @@ export interface AuditLog {
   created_at: string;
 }
 
-export interface AcdStock {
+export interface AcgSymbol {
   ticker: string;
   name: string;
   category: string;
@@ -164,7 +164,7 @@ export interface StrategyConfig {
   auto_execute: boolean;
   watchlist: string[];
   favorites: string[];
-  acd_stocks: AcdStock[];
+  acg_symbols: AcgSymbol[];
   max_daily_loss: number;
   tradingagents_url: string;
 }

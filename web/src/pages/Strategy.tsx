@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { api, connectWS } from "../api";
-import type { StrategyConfig, StrategySignal, SignalStats, AcdStock } from "../types";
+import type { StrategyConfig, StrategySignal, SignalStats, AcgSymbol } from "../types";
 
 export default function Strategy() {
   const [config, setConfig] = useState<StrategyConfig | null>(null);
@@ -8,7 +8,7 @@ export default function Strategy() {
   const [stats, setStats] = useState<SignalStats>({ total: 0, executed: 0, pending: 0 });
   const [loading, setLoading] = useState(false);
   const [scanningTicker, setScanningTicker] = useState<string | null>(null);
-  const [stockSearch, setStockSearch] = useState("");
+  const [symbolSearch, setSymbolSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
 
@@ -16,9 +16,9 @@ export default function Strategy() {
   const [balance, setBalance] = useState("46250");
   const [riskPct, setRiskPct] = useState("1.0");
   const [minRR, setMinRR] = useState("2.0");
-  const [suffix, setSuffix] = useState(".us");
+  const [suffix, setSuffix] = useState(".pro");
   const [autoExec, setAutoExec] = useState(false);
-  const [favorites, setFavorites] = useState<string[]>(["NVDA", "AAPL", "TSLA", "MSFT", "AMZN"]);
+  const [favorites, setFavorites] = useState<string[]>(["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "NAS100"]);
 
   const showToast = (msg: string, type: "ok" | "err" = "ok") => {
     setToast({ msg, type });
@@ -36,9 +36,9 @@ export default function Strategy() {
       setBalance(String(cfg.balance));
       setRiskPct(String(cfg.risk_percent));
       setMinRR(String(cfg.min_rr));
-      setSuffix(cfg.symbol_suffix);
+      setSuffix(cfg.symbol_suffix || ".pro");
       setAutoExec(cfg.auto_execute);
-      setFavorites(cfg.favorites || ["NVDA", "AAPL", "TSLA", "MSFT", "AMZN"]);
+      setFavorites(cfg.favorites || ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "NAS100"]);
     } catch (e: any) {
       showToast("Veri yüklenemedi: " + (e?.message || e), "err");
     } finally {
@@ -139,20 +139,20 @@ export default function Strategy() {
   // Categories extraction
   const categories = useMemo(() => {
     const set = new Set<string>();
-    (config?.acd_stocks || []).forEach((s) => set.add(s.category));
+    (config?.acg_symbols || []).forEach((s) => set.add(s.category));
     return ["ALL", ...Array.from(set)];
-  }, [config?.acd_stocks]);
+  }, [config?.acg_symbols]);
 
-  // Filtered ACD Markets stocks
-  const filteredStocks = useMemo(() => {
-    return (config?.acd_stocks || []).filter((s) => {
+  // Filtered ACG Markets symbols
+  const filteredSymbols = useMemo(() => {
+    return (config?.acg_symbols || []).filter((s) => {
       const matchSearch =
-        s.ticker.toLowerCase().includes(stockSearch.toLowerCase()) ||
-        s.name.toLowerCase().includes(stockSearch.toLowerCase());
+        s.ticker.toLowerCase().includes(symbolSearch.toLowerCase()) ||
+        s.name.toLowerCase().includes(symbolSearch.toLowerCase());
       const matchCat = selectedCategory === "ALL" || s.category === selectedCategory;
       return matchSearch && matchCat;
     });
-  }, [config?.acd_stocks, stockSearch, selectedCategory]);
+  }, [config?.acg_symbols, symbolSearch, selectedCategory]);
 
   return (
     <div className="space-y-6">
@@ -175,14 +175,14 @@ export default function Strategy() {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.7)]" />
-              ACD Markets Günlük / 1-4 Saatlik Trade Stratejisi
+              ACG Markets Günlük / 1-4 Saatlik Trade Stratejisi
             </h1>
             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
               1:2 R:R Pullback to Value
             </span>
           </div>
           <p className="text-xs text-zinc-400 mt-1">
-            ACD Markets hisse CFD evreni, favori hisse izleme listesi ve TradingAgents LLM motoruyla dinamik lot & kasa yönetimi.
+            ACG Markets Forex, Altın, Emtia ve Endeks (.pro) evreni, favori izleme listesi ve TradingAgents LLM motoruyla dinamik lot & kasa yönetimi.
           </p>
         </div>
 
@@ -204,7 +204,7 @@ export default function Strategy() {
           <div className="text-xl font-bold text-zinc-100 mt-1 font-mono">
             ${Number(config?.balance || 46250).toLocaleString("en-US", { minimumFractionDigits: 2 })}
           </div>
-          <div className="text-[10px] text-zinc-500 mt-1">ACD Markets Demo</div>
+          <div className="text-[10px] text-zinc-500 mt-1">ACG Markets Demo</div>
         </div>
 
         <div className="bg-zinc-900/80 border border-zinc-800/80 p-4 rounded-xl">
@@ -224,9 +224,9 @@ export default function Strategy() {
         </div>
 
         <div className="bg-zinc-900/80 border border-zinc-800/80 p-4 rounded-xl">
-          <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Favori Hisseler</div>
+          <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Favori Pariteler</div>
           <div className="text-xl font-bold text-amber-400 mt-1 font-mono">
-            {favorites.length} Hisse
+            {favorites.length} Enstrüman
           </div>
           <div className="text-[10px] text-zinc-500 mt-1">Aktif İzleme Listesi</div>
         </div>
@@ -262,12 +262,12 @@ export default function Strategy() {
 
         {favorites.length === 0 ? (
           <div className="text-center py-8 text-zinc-500 text-xs border border-dashed border-zinc-800 rounded-lg">
-            Henüz favori hisse seçilmedi. Aşağıdaki "ACD Markets Hisse Kataloğu" bölümünden yıldız ikonuna tıklayarak favorilerinizi belirleyebilirsiniz.
+            Henüz favori parite seçilmedi. Aşağıdaki "ACG Markets Enstrüman Kataloğu" bölümünden yıldız ikonuna tıklayarak favorilerinizi belirleyebilirsiniz.
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {favorites.map((ticker) => {
-              const stock = (config?.acd_stocks || []).find((s) => s.ticker === ticker);
+              const stock = (config?.acg_symbols || []).find((s) => s.ticker === ticker);
               const isScanning = scanningTicker === ticker;
               return (
                 <div
@@ -295,7 +295,7 @@ export default function Strategy() {
                   </div>
 
                   <div className="mt-3 pt-2.5 border-t border-zinc-900 flex items-center justify-between">
-                    <span className="text-[10px] font-mono text-zinc-500">{ticker}{config?.symbol_suffix}</span>
+                    <span className="text-[10px] font-mono text-cyan-400 font-semibold">{ticker}{config?.symbol_suffix}</span>
                     <button
                       onClick={() => handleScan(ticker)}
                       disabled={scanningTicker !== null}
@@ -311,24 +311,24 @@ export default function Strategy() {
         )}
       </div>
 
-      {/* SECTION 2: ACD MARKETS FULL STOCK CATALOG */}
+      {/* SECTION 2: ACG MARKETS FULL SYMBOLS CATALOG */}
       <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
-              🏛️ Tüm ACD Markets Hisseleri ({config?.acd_stocks?.length || 0})
+              🏛️ Tüm ACG Markets Parite & Emtiaları ({config?.acg_symbols?.length || 0})
             </h2>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Hisselerin yanındaki yıldıza tıklayarak yukarıdaki Hızlı Analiz ve İzleme Listesi'ne ekleyip çıkarabilirsiniz.
+              Parite veya metallerin yanındaki yıldıza tıklayarak yukarıdaki Hızlı Analiz ve İzleme Listesi'ne ekleyip çıkarabilirsiniz.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
-              placeholder="Hisse veya Şirket Ara..."
-              value={stockSearch}
-              onChange={(e) => setStockSearch(e.target.value)}
+              placeholder="Parite veya Metal Ara..."
+              value={symbolSearch}
+              onChange={(e) => setSymbolSearch(e.target.value)}
               className="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none focus:border-cyan-500 w-48"
             />
 
@@ -339,20 +339,20 @@ export default function Strategy() {
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
-                  {c === "ALL" ? "Tüm Sektörler" : c}
+                  {c === "ALL" ? "Tüm Kategoriler" : c}
                 </option>
               ))}
             </select>
           </div>
         </div>
 
-        {/* Stock List Grid */}
+        {/* Symbol List Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 max-h-72 overflow-y-auto pr-1">
-          {filteredStocks.map((stock) => {
-            const isFav = favorites.includes(stock.ticker);
+          {filteredSymbols.map((item) => {
+            const isFav = favorites.includes(item.ticker);
             return (
               <div
-                key={stock.ticker}
+                key={item.ticker}
                 className={`px-3 py-2.5 rounded-lg border flex items-center justify-between transition ${
                   isFav
                     ? "bg-amber-950/15 border-amber-500/30"
@@ -361,7 +361,7 @@ export default function Strategy() {
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <button
-                    onClick={() => toggleFavorite(stock.ticker)}
+                    onClick={() => toggleFavorite(item.ticker)}
                     className={`text-base leading-none transition ${
                       isFav ? "text-amber-400 hover:text-amber-300" : "text-zinc-600 hover:text-zinc-400"
                     }`}
@@ -371,17 +371,17 @@ export default function Strategy() {
                   </button>
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-xs text-zinc-100 font-mono">{stock.ticker}</span>
-                      <span className="text-[10px] text-zinc-500 font-mono">({stock.category})</span>
+                      <span className="font-bold text-xs text-zinc-100 font-mono">{item.ticker}</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">({item.category})</span>
                     </div>
-                    <div className="text-[10px] text-zinc-400 truncate" title={stock.name}>
-                      {stock.name}
+                    <div className="text-[10px] text-zinc-400 truncate" title={item.name}>
+                      {item.name}
                     </div>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => handleScan(stock.ticker)}
+                  onClick={() => handleScan(item.ticker)}
                   disabled={scanningTicker !== null}
                   className="px-2 py-0.5 rounded text-[10px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition disabled:opacity-40 ml-2 shrink-0"
                 >
@@ -438,15 +438,15 @@ export default function Strategy() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">ACD Broker Sembol Eki (Suffix)</label>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">ACG Broker Sembol Eki (Suffix)</label>
               <input
                 type="text"
-                placeholder=".us veya # veya boş"
+                placeholder=".pro veya .raw veya boş"
                 value={suffix}
                 onChange={(e) => setSuffix(e.target.value)}
                 className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 font-mono focus:outline-none focus:border-cyan-500"
               />
-              <span className="text-[10px] text-zinc-500 mt-1 block">Örn: NVDA + .us = NVDA.us</span>
+              <span className="text-[10px] text-zinc-500 mt-1 block">Örn: EURUSD + .pro = EURUSD.pro</span>
             </div>
 
             <div className="pt-2 border-t border-zinc-800">
