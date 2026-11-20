@@ -317,6 +317,53 @@ class DeviceManager:
                 return {"status": "ok", "mode": "adb_touch", "aoa_version": 2}
             raise exc
 
+    async def close_position_async(self, device_id: int, symbol: Optional[str] = None) -> dict[str, Any]:
+        """Closes open position on MT5 mobile via Trade tab and context menu."""
+        dev = self.db.get_device(device_id)
+        if not dev:
+            raise ValueError(f"Device {device_id} not found")
+        prof_path = pathlib.Path(dev.get("profile_path") or "profiles/galaxy_a11_mt5.json")
+        prof = json.loads(prof_path.read_text(encoding="utf-8")) if prof_path.exists() else {}
+
+        drv, src, mode = self.get_driver_and_source(dev)
+        nav = prof.get("navigation", {})
+        t_tab = nav.get("tab_trade", [360, 1395])
+
+        # 1. Switch to Trade tab
+        if hasattr(drv, "tap_async"):
+            await drv.tap_async(t_tab[0], t_tab[1], dwell_ms=85)
+        else:
+            await asyncio.to_thread(drv.tap, t_tab[0], t_tab[1], 85)
+        await asyncio.sleep(0.9)
+
+        # 2. Long press on first position row
+        trade_scr = prof.get("trade_screen", {})
+        first_row = trade_scr.get("first_position_row", [360, 532])
+        if hasattr(drv, "swipe_async"):
+            await drv.swipe_async(first_row[0], first_row[1], first_row[0], first_row[1], duration_ms=900)
+        else:
+            await asyncio.to_thread(drv.tap, first_row[0], first_row[1], 900)
+        await asyncio.sleep(0.9)
+
+        # 3. Tap 'Pozisyonu Kapat' from context menu
+        ctx_close = trade_scr.get("context_close_position", [360, 1058])
+        if hasattr(drv, "tap_async"):
+            await drv.tap_async(ctx_close[0], ctx_close[1], dwell_ms=85)
+        else:
+            await asyncio.to_thread(drv.tap, ctx_close[0], ctx_close[1], 85)
+        await asyncio.sleep(1.2)
+
+        # 4. Tap 'Kapat' bottom button
+        close_btn = trade_scr.get("close_confirm_button", [360, 1434])
+        if hasattr(drv, "tap_async"):
+            await drv.tap_async(close_btn[0], close_btn[1], dwell_ms=95)
+        else:
+            await asyncio.to_thread(drv.tap, close_btn[0], close_btn[1], 95)
+        await asyncio.sleep(1.0)
+
+        self.db.add_log(f"Position close command executed on device #{device_id} ({symbol or 'first'})", level="INFO")
+        return {"status": "closed", "device_id": device_id, "symbol": symbol}
+
     def update_calibration(self, device_id: int, key: str, x: int, y: int) -> dict[str, Any]:
         dev = self.db.get_device(device_id)
         if not dev:

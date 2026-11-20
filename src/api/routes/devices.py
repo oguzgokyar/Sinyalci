@@ -59,6 +59,15 @@ async def test_device_aoa(request: Request, device_id: int):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.post("/{device_id}/close-position")
+async def close_device_position(request: Request, device_id: int):
+    try:
+        res = await request.app.state.dm.close_position_async(device_id)
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/{device_id}/calibrate")
 async def calibrate_device(request: Request, device_id: int, body: CalibrationUpdate):
     try:

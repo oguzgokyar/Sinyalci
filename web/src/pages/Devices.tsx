@@ -142,6 +142,17 @@ export default function Devices() {
     }
   };
 
+  const runClosePosition = async () => {
+    if (selectedId === null) return;
+    setActionLog("MT5 üzerinden pozisyon kapatılıyor...");
+    try {
+      await api.closeDevicePosition(selectedId);
+      setActionLog("✓ Pozisyon kapatma komutu iletildi.");
+    } catch (err: unknown) {
+      setActionLog(`Hata: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   const handleImageClick = async (e: React.MouseEvent<HTMLImageElement>) => {
     if (!imgRef.current || selectedId === null) return;
     const rect = imgRef.current.getBoundingClientRect();
@@ -304,6 +315,12 @@ export default function Devices() {
               title="MT5 açma, sekmeler, form açma, lot yazma ve güvenli geri çıkış simülasyonu (Sıfır Risk)"
             >
               <span>{runningDiag ? "⏳ Test Ediliyor..." : "⚡ Tam Simülasyon Testi"}</span>
+            </button>
+            <button
+              onClick={runClosePosition}
+              className="px-2.5 py-1 bg-rose-950/80 hover:bg-rose-900 text-xs text-rose-300 font-medium rounded border border-rose-800/60"
+            >
+              Pozisyon Kapat
             </button>
             <button
               onClick={runAoaTest}

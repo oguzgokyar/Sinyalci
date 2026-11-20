@@ -155,6 +155,35 @@ def _execute_action(adb_target: str, action: str, params: dict[str, Any]) -> dic
         _adb(target, "shell", "input", "keyevent", "3")
         return {"ok": True}
 
+    if action == "CLEAR_AND_TYPE":
+        text = str(params.get("text", ""))
+        # Move cursor to end
+        _adb(adb_target, "shell", "input", "keyevent", "123")
+        # Delete up to 10 characters
+        for _ in range(10):
+            _adb(adb_target, "shell", "input", "keyevent", "67")
+        # Type text
+        _adb(adb_target, "shell", "input", "text", text)
+        # Dismiss soft keyboard cleanly
+        _adb(adb_target, "shell", "input", "keyevent", "111")
+        return {"ok": True}
+
+    if action == "SWIPE":
+        x1, y1 = int(params["x1"]), int(params["y1"])
+        x2, y2 = int(params["x2"]), int(params["y2"])
+        dur = int(params.get("duration_ms", 250))
+        _adb(adb_target, "shell", "input", "swipe", str(x1), str(y1), str(x2), str(y2), str(dur))
+        return {"ok": True}
+
+    if action == "KEYEVENT":
+        code = str(params.get("code", "4"))
+        _adb(adb_target, "shell", "input", "keyevent", code)
+        return {"ok": True}
+
+    if action == "DISMISS_KEYBOARD":
+        _adb(adb_target, "shell", "input", "keyevent", "111")
+        return {"ok": True}
+
     if action == "SCREENCAP":
         rc, raw = _adb(target, "exec-out", "screencap", "-p", binary=True)
         if rc != 0 or not raw or len(raw) < 100:

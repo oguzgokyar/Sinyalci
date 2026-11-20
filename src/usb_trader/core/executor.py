@@ -1,5 +1,8 @@
 """Closed-loop humanized TradeExecutor orchestrating vision, humanizer, and USB AOA."""
 
+from __future__ import annotations
+
+import asyncio
 from dataclasses import dataclass
 import time
 from typing import Any, Callable, Literal, Optional
@@ -62,6 +65,49 @@ class TradeExecutor:
         )
         dwell = sample_dwell_ms(self._cfg.dwell_min_ms, self._cfg.dwell_max_ms)
         self._driver.tap(tx, ty, dwell_ms=dwell)
+
+    async def _human_tap_async(self, coords: tuple[int, int]) -> None:
+        tx, ty = apply_gaussian_jitter(
+            coords[0],
+            coords[1],
+            sigma=self._cfg.jitter_sigma_px,
+            max_offset=self._cfg.jitter_max_offset_px,
+        )
+        dwell = sample_dwell_ms(self._cfg.dwell_min_ms, self._cfg.dwell_max_ms)
+        tap_async_fn = getattr(self._driver, "tap_async", None)
+        if asyncio.iscoroutinefunction(tap_async_fn):
+            await self._driver.tap_async(tx, ty, dwell_ms=dwell)
+        else:
+            await asyncio.to_thread(self._driver.tap, tx, ty, dwell)
+
+    def _type_value(self, text: str) -> None:
+        if hasattr(self._driver, "clear_and_type"):
+            self._driver.clear_and_type(text)
+        else:
+            self._driver.type_text("\b\b\b\b" + text)
+
+    async def _type_value_async(self, text: str) -> None:
+        cat_async_fn = getattr(self._driver, "clear_and_type_async", None)
+        if asyncio.iscoroutinefunction(cat_async_fn):
+            await self._driver.clear_and_type_async(text)
+            return
+
+        if hasattr(self._driver, "clear_and_type"):
+            await asyncio.to_thread(self._driver.clear_and_type, text)
+            return
+
+        tt_async_fn = getattr(self._driver, "type_text_async", None)
+        if asyncio.iscoroutinefunction(tt_async_fn):
+            await self._driver.type_text_async(text)
+            return
+
+        await asyncio.to_thread(self._driver.type_text, "\b\b\b\b" + text)
+
+    async def _grab_frame_async(self) -> Any:
+        grab_async_fn = getattr(self._frames, "grab_async", None)
+        if asyncio.iscoroutinefunction(grab_async_fn):
+            return await self._frames.grab_async()
+        return await asyncio.to_thread(self._frames.grab)
 
     def execute(self, signal: TradeSignal) -> bool:
         if not self._cb.claim_signal(signal.idempotency_key):

@@ -49,6 +49,8 @@ def bootstrap_defaults(db: Database) -> None:
 def main() -> None:
     root = pathlib.Path(__file__).resolve().parent
     os.chdir(root)
+    if str(root / "src") not in sys.path:
+        sys.path.insert(0, str(root / "src"))
     db = Database(root / "data" / "treader.db")
     bootstrap_defaults(db)
 

@@ -120,6 +120,23 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
             await ws_hub.broadcast("devices_changed", db.list_devices())
             await ws_hub.broadcast("system_state", system._build_state(app).model_dump())
 
+    agent_dir = pathlib.Path(__file__).resolve().parents[2] / "agent"
+
+    @app.get("/setup")
+    @app.get("/setup_agent.sh")
+    async def serve_setup_script():
+        sh_file = agent_dir / "setup_agent.sh"
+        if sh_file.exists():
+            return FileResponse(sh_file, media_type="text/x-shellscript")
+        return FileResponse(agent_dir / "phone_agent.py")
+
+    @app.get("/agent/phone_agent.py")
+    async def serve_phone_agent():
+        py_file = agent_dir / "phone_agent.py"
+        if py_file.exists():
+            return FileResponse(py_file, media_type="text/x-python")
+        return FileResponse(agent_dir / "phone_agent.py")
+
     dist_dir = pathlib.Path(__file__).resolve().parents[2] / "web" / "dist"
     if dist_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(dist_dir / "assets")), name="assets")
