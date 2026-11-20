@@ -40,7 +40,7 @@ async def delete_device(request: Request, device_id: int):
 @router.get("/{device_id}/screenshot")
 async def get_device_screenshot(request: Request, device_id: int):
     try:
-        frame, _ = request.app.state.dm.capture_screen(device_id)
+        frame, _ = await request.app.state.dm.capture_screen(device_id)
         ok, buf = cv2.imencode(".png", frame)
         if not ok:
             raise RuntimeError("PNG encode failed")
@@ -52,7 +52,7 @@ async def get_device_screenshot(request: Request, device_id: int):
 @router.post("/{device_id}/test-aoa")
 async def test_device_aoa(request: Request, device_id: int):
     try:
-        res = request.app.state.dm.test_aoa(device_id)
+        res = await request.app.state.dm.test_aoa(device_id)
         await request.app.state.ws.broadcast("devices_changed", request.app.state.db.list_devices())
         return res
     except Exception as exc:
@@ -69,3 +69,39 @@ async def calibrate_device(request: Request, device_id: int, body: CalibrationUp
         return res
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{device_id}/close-position")
+async def close_device_position(request: Request, device_id: int):
+    try:
+        res = await request.app.state.dm.close_position_async(device_id)
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/{device_id}/tap")
+async def tap_device(request: Request, device_id: int, x: int = 540, y: int = 1435, dwell_ms: int = 90):
+    try:
+        dm = request.app.state.dm
+        dev = dm.db.get_device(device_id)
+        if not dev:
+            raise HTTPException(status_code=404, detail="Device not found")
+        serial = dev.get("serial")
+        if dm._is_remote_agent(dev) and dm.agent_hub:
+            res = await dm.agent_hub.send_command(serial, "TAP", {"x": x, "y": y, "dwell_ms": dwell_ms}, timeout=5.0)
+            return res
+        drv, _ = dm._get_touch_driver(dev)
+        drv.tap(x, y, dwell_ms=dwell_ms)
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/{device_id}/dry-run-test")
+async def run_device_dry_run_test(request: Request, device_id: int):
+    try:
+        res = await request.app.state.dm.run_dry_run_diagnostics(device_id)
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

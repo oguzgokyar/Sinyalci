@@ -137,6 +137,16 @@ export const api = {
     req<{ report_id: string; ticker: string; date: string; content: string }>(
       `/api/strategy/reports/${ticker}/${reportId}`
     ),
+  getTradingAgentsHealth: () =>
+    req<import("./types").TradingAgentsHealth>("/api/strategy/health"),
+  closeDevicePosition: (id: number) =>
+    req<{ status: string; device_id: number; message: string }>(`/api/devices/${id}/close-position`, {
+      method: "POST",
+    }),
+  runDeviceDiagnostic: (id: number) =>
+    req<import("./types").DiagnosticResult>(`/api/devices/${id}/dry-run-test`, {
+      method: "POST",
+    }),
 };
 
 export function connectWS(onEvent: (event: string, data: unknown) => void): () => void {

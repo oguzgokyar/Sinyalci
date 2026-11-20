@@ -17,7 +17,6 @@ async def test_api_full_flow(test_app):
         res = await client.get("/api/system")
         assert res.status_code == 200
         state = res.json()
-        assert state["dry_run"] is True
         assert state["kill_switch"] is False
 
         # 2. Register Device

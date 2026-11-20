@@ -15,6 +15,7 @@ class OrderScheduler:
         self.interval = poll_interval_s
         self._task: asyncio.Task | None = None
         self._autopilot_task: asyncio.Task | None = None
+        self._in_flight: set[int] = set()
         self._running = False
         self._is_scanning = False
         self._last_scan_time = 0.0
@@ -35,11 +36,36 @@ class OrderScheduler:
     async def _run_loop(self) -> None:
         while self._running:
             try:
+                # 1. Pick up any queued orders for immediate execution
+                orders = self.db.list_orders(limit=10)
+                for ord_data in orders:
+                    oid = ord_data.get("id")
+                    if ord_data.get("status") == "queued" and oid and oid not in self._in_flight:
+                        self._in_flight.add(oid)
+
+                        async def _exec_task(o_id: int):
+                            try:
+                                await self.dm.execute_order_async(o_id)
+                            finally:
+                                self._in_flight.discard(o_id)
+
+                        asyncio.create_task(_exec_task(oid))
+
+                # 2. Pick up due scheduled orders
                 now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
                 due_orders = self.db.due_scheduled_orders(now_iso)
                 for ord_data in due_orders:
-                    # Fire and forget into device worker queue
-                    asyncio.create_task(self.dm.execute_order_async(ord_data["id"]))
+                    oid = ord_data.get("id")
+                    if oid and oid not in self._in_flight:
+                        self._in_flight.add(oid)
+
+                        async def _exec_task_due(o_id: int):
+                            try:
+                                await self.dm.execute_order_async(o_id)
+                            finally:
+                                self._in_flight.discard(o_id)
+
+                        asyncio.create_task(_exec_task_due(oid))
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -52,6 +78,7 @@ class OrderScheduler:
         import time
 
         engine = StrategyEngine(self.db)
+        engine.dm = self.dm
         ticks = 0
 
         # Wait 5 seconds after startup before first tick
@@ -60,9 +87,13 @@ class OrderScheduler:
         while self._running:
             try:
                 ticks += 1
+                cfg = engine.get_config()
+                poll_interval = int(cfg.get("data_poll_interval", 10))
+                # Base tick is 5 seconds; calculate modulo based on user configured poll interval
+                poll_ticks = max(1, poll_interval // 5)
 
-                # 1. Every 15 seconds: update live paper positions (prices, floating PnL, TP/SL triggers)
-                if ticks % 3 == 0:
+                # 1. Update live paper positions based on user selected interval
+                if ticks % poll_ticks == 0:
                     await engine.update_live_paper_positions(ws_hub=self.ws_hub)
 
                 # 2. Every 60 seconds: check Autopilot for new setups
@@ -79,6 +110,12 @@ class OrderScheduler:
                                 candidates = engine.prescreen_favorites()
                                 best = next((c for c in candidates if c["score"] >= 60 and c["setup"] in ["BUY", "SELL"]), None)
                                 if best:
+                                    # Verify TradingAgents health before triggering deep research
+                                    health = await engine.check_tradingagents_health(timeout=2.0)
+                                    if not health.get("healthy"):
+                                        self.db.add_log("Otopilot duraklatıldı: TradingAgents AI motoru çevrimdışı.", level="WARN")
+                                        continue
+
                                     self._is_scanning = True
                                     self._last_scan_time = now
                                     try:

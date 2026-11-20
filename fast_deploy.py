@@ -61,7 +61,8 @@ def main():
     
     sync_cmd = (
         f"docker cp {volume_path}/src/. {cname}:/app/src/ && "
-        f"docker cp {volume_path}/web/dist/. {cname}:/app/web/dist/"
+        f"docker cp {volume_path}/web/dist/. {cname}:/app/web/dist/ && "
+        f"docker cp {volume_path}/agent/. {cname}:/app/agent/"
     )
     copy_run = ["ssh"] + ssh_opts + ["root@10.0.1.1", sync_cmd]
     run_cmd(copy_run)

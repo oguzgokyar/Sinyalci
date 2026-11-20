@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from api.agent_hub import AgentHub
 from api.db import Database
 from api.device_manager import DeviceManager
-from api.routes import accounts, devices, orders, system, strategy
+from api.routes import accounts, devices, orders, system, strategy, agent_setup
 from api.scheduler import OrderScheduler
 from api.ws import EventHub
 
@@ -21,7 +21,7 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
     db = Database(db_path)
     ws_hub = EventHub()
     agent_hub = AgentHub()
-    dm = DeviceManager(db, ws_hub)
+    dm = DeviceManager(db, ws_hub, agent_hub=agent_hub)
     scheduler = OrderScheduler(db, dm, ws_hub=ws_hub, poll_interval_s=1.0)
 
     @asynccontextmanager
@@ -52,6 +52,7 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
     app.include_router(accounts.router)
     app.include_router(orders.router)
     app.include_router(strategy.router)
+    app.include_router(agent_setup.router)
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):
@@ -71,14 +72,52 @@ def create_app(db_path: str | pathlib.Path = "data/treader.db") -> FastAPI:
         client_ip = ws.client.host if ws.client else ""
         await agent_hub.register(device_id, ws, ip=client_ip, model=model)
         db.add_log(f"4.5G Telefon Ajanı bağlandı: {device_id} ({client_ip})", level="INFO")
+        
+        # Auto-register or match device in SQLite
+        existing_devs = db.list_devices()
+        dev_row = next((d for d in existing_devs if d.get("serial") == device_id or d.get("name") in (device_id, model)), None)
+        if not dev_row:
+            dev_row = db.create_device({
+                "name": f"{model} (4.5G)",
+                "serial": device_id,
+                "usb_vid": "45G0",
+                "usb_pid": "WSS0",
+                "screen_width": 720,
+                "screen_height": 1560,
+                "profile_path": "profiles/galaxy_a11_mt5.json",
+            })
+        db.update_device_status(dev_row["id"], "ready", aoa_version=2)
+
+        # Auto-create default MT5 account if none exists so orders can be routed
+        accs = db.list_accounts()
+        if not accs:
+            db.create_account({
+                "device_id": dev_row["id"],
+                "label": "MT5 4.5G Canlı Hesap",
+                "login": "ACG-46K",
+                "server": "ACGMarkets-Server",
+                "account_type": "Real",
+                "balance": 46250.0,
+                "max_lot": 5.0,
+                "daily_max_orders": 20,
+                "daily_max_loss": 925.0,
+                "enabled": 1,
+            })
+
+        await ws_hub.broadcast("devices_changed", db.list_devices())
         await ws_hub.broadcast("system_state", system._build_state(app).model_dump())
         try:
             while True:
                 payload = await ws.receive_json()
                 agent_hub.handle_incoming(device_id, payload)
+                if "battery" in payload and payload["battery"] is not None:
+                    db.update_device_status(dev_row["id"], "ready", battery=int(payload["battery"]))
+                    await ws_hub.broadcast("devices_changed", db.list_devices())
         except WebSocketDisconnect:
             agent_hub.unregister(device_id)
+            db.update_device_status(dev_row["id"], "offline")
             db.add_log(f"4.5G Telefon Ajanı koptu: {device_id}", level="WARN")
+            await ws_hub.broadcast("devices_changed", db.list_devices())
             await ws_hub.broadcast("system_state", system._build_state(app).model_dump())
 
     dist_dir = pathlib.Path(__file__).resolve().parents[2] / "web" / "dist"

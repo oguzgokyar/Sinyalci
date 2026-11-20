@@ -80,7 +80,7 @@ export default function Orders({ state }: { state: SystemState | null }) {
 
   useEffect(() => {
     load();
-  }, [state?.today_orders, state?.pending_orders, state?.dry_run]);
+  }, [state?.today_orders, state?.pending_orders]);
 
   const toggleAccountSelect = (id: number) => {
     setSelectedAccounts((prev) =>
@@ -246,10 +246,8 @@ export default function Orders({ state }: { state: SystemState | null }) {
           <div className="text-xs mono">
             {msg ? (
               <span className="text-amber-400">{msg}</span>
-            ) : state?.dry_run ? (
-              <span className="text-amber-400/90">Simülasyon (DRY-RUN) açık — telefona fiziksel dokunma için sağ üstten DRY-RUN'ı kapatın.</span>
             ) : (
-              <span className="text-emerald-400">Canlı fiziksel icra aktif (DRY-RUN OFF)</span>
+              <span className="text-emerald-400">Canlı fiziksel icra aktif — emirler bağlı Android telefonda resmi MT5 ile açılır.</span>
             )}
           </div>
           <button

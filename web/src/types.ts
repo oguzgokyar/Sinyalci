@@ -1,6 +1,6 @@
 export interface SystemState {
   kill_switch: boolean;
-  dry_run: boolean;
+  dry_run?: boolean;
   webhook_secret: string;
   total_balance: number;
   active_devices: number;
@@ -31,6 +31,8 @@ export interface EnvironmentInfo {
   checklist: ChecklistItem[];
   agent_token: string;
   vps_public_url: string;
+  market_data_source?: "biquote" | "yahoo";
+  data_poll_interval?: number;
   agents: Array<{
     device_id: string;
     ip: string;
@@ -163,6 +165,9 @@ export interface StrategyConfig {
   symbol_suffix: string;
   auto_execute: boolean;
   autopilot_enabled: boolean;
+  live_autopilot_enabled?: boolean;
+  market_data_source?: "biquote" | "yahoo";
+  data_poll_interval?: number;
   last_autopilot_run?: string;
   timeframe: string;
   paper_trading: boolean;
@@ -235,5 +240,32 @@ export interface SignalStats {
   total: number;
   executed: number;
   pending: number;
+}
+
+export interface TradingAgentsHealth {
+  healthy: boolean;
+  status: string;
+  service: string;
+  version: string | null;
+  latency_ms: number;
+  url: string;
+  error: string | null;
+}
+
+export interface DiagnosticStep {
+  step: number;
+  title: string;
+  ok: boolean;
+  duration_ms: number;
+  detail: string;
+}
+
+export interface DiagnosticResult {
+  ok: boolean;
+  device_id: number;
+  device_name: string;
+  total_duration_ms: number;
+  steps: DiagnosticStep[];
+  message: string;
 }
 

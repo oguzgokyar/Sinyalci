@@ -25,7 +25,6 @@ def _build_state(app) -> SystemStateOut:
 
     return SystemStateOut(
         kill_switch=db.get_setting("kill_switch") == "1",
-        dry_run=db.get_setting("dry_run") == "1",
         webhook_secret=db.get_setting("webhook_secret"),
         total_balance=round(sum(a["balance"] for a in accounts), 2),
         active_devices=sum(1 for d in devices if d["status"] == "ready"),
@@ -88,7 +87,6 @@ async def get_environment_info(request: Request) -> dict[str, Any]:
         agent_count=agent_count,
         agent_token=token,
         kill_switch=kill_switch,
-        dry_run=dry_run,
     )
     return {
         "env": env,
@@ -97,6 +95,8 @@ async def get_environment_info(request: Request) -> dict[str, Any]:
         "agent_token": token,
         "vps_public_url": db.get_setting("vps_public_url", ""),
         "agents": hub.list_agents() if hub else [],
+        "market_data_source": db.get_setting("market_data_source", "biquote"),
+        "data_poll_interval": int(db.get_setting("data_poll_interval", "10")),
     }
 
 

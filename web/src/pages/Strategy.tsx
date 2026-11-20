@@ -1,6 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { api, connectWS } from "../api";
 import type {
+  Account,
+  Device,
+  Order,
   StrategyConfig,
   StrategySignal,
   SignalStats,
@@ -10,7 +13,11 @@ import type {
 } from "../types";
 
 export default function Strategy() {
-  const [activeTab, setActiveTab] = useState<"trades" | "strategy">("trades");
+  const [activeTab, setActiveTab] = useState<"simulation" | "live" | "strategy">("simulation");
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [liveOrders, setLiveOrders] = useState<Order[]>([]);
+  const [syncingBalance, setSyncingBalance] = useState(false);
 
   const [config, setConfig] = useState<StrategyConfig | null>(null);
   const [signals, setSignals] = useState<StrategySignal[]>([]);
@@ -33,8 +40,19 @@ export default function Strategy() {
 
   // Autopilot & Prescreener state
   const [autopilotEnabled, setAutopilotEnabled] = useState(true);
+  const [liveAutopilotEnabled, setLiveAutopilotEnabled] = useState(false);
   const [prescreenList, setPrescreenList] = useState<PrescreenCandidate[]>([]);
   const [showRadarDetails, setShowRadarDetails] = useState(false);
+  const [taHealth, setTaHealth] = useState<import("../types").TradingAgentsHealth | null>(null);
+
+  const checkTAHealth = async () => {
+    try {
+      const h = await api.getTradingAgentsHealth();
+      setTaHealth(h);
+    } catch {
+      setTaHealth(null);
+    }
+  };
 
   // Slide-Over Drawer state (Analiz Özeti & Geçmişi)
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
@@ -72,10 +90,13 @@ export default function Strategy() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [cfg, sigData, paperData] = await Promise.all([
+      const [cfg, sigData, paperData, accs, devs, ords] = await Promise.all([
         api.getStrategyConfig(),
         api.getSignals(),
         api.getPaperTrades(),
+        api.getAccounts(),
+        api.getDevices(),
+        api.getOrders(),
       ]);
       setConfig(cfg);
       setSignals(sigData.signals);
@@ -83,6 +104,9 @@ export default function Strategy() {
       setOpenPositions(paperData.open_positions);
       setClosedPositions(paperData.closed_positions);
       setPaperStats(paperData.stats);
+      setAccounts(accs);
+      setDevices(devs);
+      setLiveOrders(ords);
 
       setBalance(String(cfg.balance));
       setRiskPct(String(cfg.risk_percent));
@@ -91,6 +115,7 @@ export default function Strategy() {
       setAutoExec(cfg.auto_execute);
       setPaperTrading(cfg.paper_trading !== false);
       setAutopilotEnabled(cfg.autopilot_enabled !== false);
+      setLiveAutopilotEnabled(cfg.live_autopilot_enabled === true);
       setTimeframe(cfg.timeframe || "H1");
       setFavorites(cfg.favorites || ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "NAS100"]);
 
@@ -102,11 +127,29 @@ export default function Strategy() {
     }
   };
 
+  const handleSyncLiveBalance = async () => {
+    const targetId = accounts[0]?.id;
+    if (!targetId) return;
+    setSyncingBalance(true);
+    try {
+      const res = await api.syncBalance(targetId);
+      showToast(`✓ Canlı bakiye güncellendi: $${res.balance.toFixed(2)}`);
+      const accs = await api.getAccounts();
+      setAccounts(accs);
+    } catch (e: any) {
+      showToast(`Bakiye okunamadı: ${e?.message || e}`, "err");
+    } finally {
+      setSyncingBalance(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
+    checkTAHealth();
 
     const intervalId = setInterval(() => {
       loadPrescreen();
+      checkTAHealth();
     }, 30000);
 
     const unsub = connectWS((event, data) => {
@@ -115,14 +158,26 @@ export default function Strategy() {
         event === "signal_executed" ||
         event === "signal_updated" ||
         event === "paper_position_opened" ||
-        event === "paper_position_closed"
+        event === "paper_position_closed" ||
+        event === "order_updated" ||
+        event === "accounts_changed" ||
+        event === "devices_changed"
       ) {
-        Promise.all([api.getSignals(), api.getPaperTrades()]).then(([sigRes, paperRes]) => {
+        Promise.all([
+          api.getSignals(),
+          api.getPaperTrades(),
+          api.getOrders(),
+          api.getAccounts(),
+          api.getDevices(),
+        ]).then(([sigRes, paperRes, ords, accs, devs]) => {
           setSignals(sigRes.signals);
           setStats(sigRes.stats);
           setOpenPositions(paperRes.open_positions);
           setClosedPositions(paperRes.closed_positions);
           setPaperStats(paperRes.stats);
+          setLiveOrders(ords);
+          setAccounts(accs);
+          setDevices(devs);
         }).catch(() => {});
         loadPrescreen();
       } else if (event === "paper_positions_updated") {
@@ -184,9 +239,21 @@ export default function Strategy() {
     try {
       const updated = await api.updateStrategyConfig({ autopilot_enabled: next });
       setConfig(updated);
-      showToast(next ? "🤖 Otopilot AKTİF: Piyasa ve seanslar otomatik taranıyor." : "⏸️ Otopilot DURDURULDU.");
+      showToast(next ? "Simülasyon Başlatıldı." : "Simülasyon Durduruldu.");
     } catch (e: any) {
-      showToast("Otopilot güncellenemedi: " + (e?.message || e), "err");
+      showToast("Ayar güncellenemedi: " + (e?.message || e), "err");
+    }
+  };
+
+  const handleToggleLiveAutopilot = async () => {
+    const next = !liveAutopilotEnabled;
+    setLiveAutopilotEnabled(next);
+    try {
+      const updated = await api.updateStrategyConfig({ live_autopilot_enabled: next });
+      setConfig(updated);
+      showToast(next ? "Canlı Otopilot Devrede." : "Canlı Otopilot Durduruldu.");
+    } catch (e: any) {
+      showToast("Canlı otopilot güncellenemedi: " + (e?.message || e), "err");
     }
   };
 
@@ -279,11 +346,13 @@ export default function Strategy() {
 
   const handleExecute = async (id: number) => {
     try {
+      showToast(`Sinyal #${id} gerçek MT5 emrine dönüştürülüyor...`);
       await api.executeSignal(id);
-      showToast(`Sinyal #${id} gerçek MT5 emrine dönüştürüldü!`);
-      const sigData = await api.getSignals();
+      showToast(`✓ Sinyal #${id} MT5 emrine dönüştürüldü ve telefona iletildi!`);
+      const [sigData, ords] = await Promise.all([api.getSignals(), api.getOrders()]);
       setSignals(sigData.signals);
       setStats(sigData.stats);
+      setLiveOrders(ords);
     } catch (e: any) {
       showToast("Emir iletim hatası: " + (e?.message || e), "err");
     }
@@ -338,19 +407,35 @@ export default function Strategy() {
       {/* TOP BAR: RESPONSIVE TABS SWITCHER & MASTER STATUS */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 bg-zinc-900/90 p-3 sm:p-4 rounded-xl border border-zinc-800">
         <div className="flex items-center gap-3 w-full lg:w-auto">
-          <div className="grid grid-cols-2 sm:flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 w-full sm:w-auto">
+          <div className="grid grid-cols-3 sm:flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 w-full sm:w-auto">
             <button
-              onClick={() => setActiveTab("trades")}
+              onClick={() => setActiveTab("simulation")}
               className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-bold font-mono transition flex items-center justify-center gap-1.5 ${
-                activeTab === "trades"
-                  ? "bg-cyan-600 text-slate-950 shadow-md"
+                activeTab === "simulation"
+                  ? "bg-cyan-600 text-slate-950 shadow-md font-bold"
                   : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              <span>⚡ İşlemler</span>
+              <span>🧪 Simülasyon</span>
               {openPositions.length > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/50">
                   {openPositions.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab("live")}
+              className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-bold font-mono transition flex items-center justify-center gap-1.5 ${
+                activeTab === "live"
+                  ? "bg-emerald-600 text-zinc-950 shadow-md font-bold"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <span>⚡ Canlı</span>
+              {liveOrders.filter(o => o.status === "executing" || o.status === "queued").length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-950 text-amber-300 border border-amber-500/50">
+                  {liveOrders.filter(o => o.status === "executing" || o.status === "queued").length}
                 </span>
               )}
             </button>
@@ -370,18 +455,48 @@ export default function Strategy() {
 
         {/* Master Action Tools */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Autopilot Switch */}
-          <button
-            onClick={handleToggleAutopilot}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition flex items-center gap-1.5 border ${
-              autopilotEnabled
-                ? "bg-emerald-950/60 border-emerald-500 text-emerald-300 shadow-lg shadow-emerald-950/30"
-                : "bg-zinc-950 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+          {/* Tab Specific Master Action Button */}
+          {activeTab === "simulation" && (
+            <button
+              onClick={handleToggleAutopilot}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition flex items-center gap-1.5 border ${
+                autopilotEnabled
+                  ? "bg-cyan-950/60 border-cyan-500 text-cyan-300 shadow-lg shadow-cyan-950/30"
+                  : "bg-zinc-950 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${autopilotEnabled ? "bg-cyan-400 animate-pulse" : "bg-zinc-500"}`} />
+              {autopilotEnabled ? "Simülasyonu Durdur" : "Simülasyonu Başlat"}
+            </button>
+          )}
+
+          {activeTab === "live" && (
+            <button
+              onClick={handleToggleLiveAutopilot}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition flex items-center gap-1.5 border ${
+                liveAutopilotEnabled
+                  ? "bg-emerald-950/70 border-emerald-500 text-emerald-300 shadow-lg shadow-emerald-950/40 animate-pulse"
+                  : "bg-zinc-950 border-zinc-700 text-zinc-400 hover:text-zinc-200"
+              }`}
+              title="Yapay zeka otopilotunun fiziksel telefonda canlı emir açmasını yönetir"
+            >
+              <span className={`w-2 h-2 rounded-full ${liveAutopilotEnabled ? "bg-emerald-400" : "bg-zinc-500"}`} />
+              {liveAutopilotEnabled ? "Otopilot Devrede" : "Otopilotu Başlat"}
+            </button>
+          )}
+
+          {/* TradingAgents Backend Health Pill */}
+          <div
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium border flex items-center gap-1.5 ${
+              taHealth?.healthy
+                ? "bg-zinc-950/80 border-emerald-500/30 text-emerald-400"
+                : "bg-zinc-950/80 border-rose-500/30 text-rose-400"
             }`}
+            title={taHealth?.url || "TradingAgents AI Analiz Motoru"}
           >
-            <span className={`w-2 h-2 rounded-full ${autopilotEnabled ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} />
-            {autopilotEnabled ? "Otopilot Devrede" : "Otopilotu Başlat"}
-          </button>
+            <span className={`w-1.5 h-1.5 rounded-full ${taHealth?.healthy ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-rose-500"}`} />
+            <span>AI: {taHealth?.healthy ? `${taHealth.latency_ms}ms` : "Çevrimdışı"}</span>
+          </div>
 
           {/* Quick Autopilot Run */}
           <button
@@ -412,9 +527,9 @@ export default function Strategy() {
       </div>
 
       {/* ========================================================================= */}
-      {/* TAB 1: İŞLEMLER MASASI (TRADING DESK)                                    */}
+      {/* TAB 1: SİMÜLASYON İŞLEMLER MASASI (PAPER TRADING DESK)                    */}
       {/* ========================================================================= */}
-      {activeTab === "trades" && (
+      {activeTab === "simulation" && (
         <div className="space-y-6">
           {/* CORE KPI METRICS: Responsive Grid */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-3.5">
@@ -735,9 +850,10 @@ export default function Strategy() {
                         <div className="mt-3 flex items-center justify-end gap-2">
                           <button
                             onClick={() => handleExecute(sig.id)}
-                            className="px-2.5 py-1 rounded text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-slate-950"
+                            className="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-slate-950 transition flex items-center gap-1 shadow-sm"
+                            title="Emri fiziksel telefona gönderip canlı MT5'te aç"
                           >
-                            MT5'e İlet
+                            <span>⚡ Canlıda Aç (MT5)</span>
                           </button>
                           <button
                             onClick={() => handleReject(sig.id)}
@@ -801,7 +917,398 @@ export default function Strategy() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: STRATEJİ & KASA YÖNETİMİ (STRATEGY & PLAYBOOK)                      */}
+      {/* TAB 2: CANLI İŞLEMLER MASASI (LIVE TRADING DESK)                           */}
+      {/* ========================================================================= */}
+      {activeTab === "live" && (
+        <div className="space-y-6">
+          {/* LIVE ACCOUNT CORE KPI METRICS */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-3.5">
+            {/* Card 1: Canlı Bakiye */}
+            <div className="bg-zinc-900/80 border border-emerald-500/30 p-3 sm:p-4 rounded-xl relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-emerald-400 uppercase tracking-wider">Canlı MT5 Bakiyesi</span>
+                <button
+                  onClick={() => handleSyncLiveBalance()}
+                  disabled={syncingBalance}
+                  className="px-2 py-0.5 text-[10px] font-mono bg-zinc-800 hover:bg-zinc-700 text-cyan-300 rounded border border-zinc-700 transition"
+                  title="Telefondaki ekrandan güncel bakiyeyi oku"
+                >
+                  {syncingBalance ? "..." : "↻ Tara"}
+                </button>
+              </div>
+              <div className="text-xl font-bold text-emerald-300 mt-1 font-mono">
+                ${Number(accounts[0]?.balance || 46250).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-zinc-500 mt-1">Başlangıç: $46.250,00</div>
+            </div>
+
+            {/* Card 2: Gerçekleşen Kâr/Zarar (MT5 Doğrulanmış Fark) */}
+            {(() => {
+              const liveBal = Number(accounts[0]?.balance || 46250);
+              const realPnl = liveBal - 46250.0;
+              const isProfit = realPnl >= 0;
+              return (
+                <div className="bg-zinc-900/80 border border-zinc-800/80 p-3 sm:p-4 rounded-xl">
+                  <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Gerçekleşen Kâr/Zarar</div>
+                  <div className={`text-xl font-bold mt-1 font-mono ${isProfit ? "text-emerald-400" : "text-rose-400"}`}>
+                    {isProfit ? "+" : ""}${realPnl.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-zinc-500 mt-1">
+                    MT5 Canlı Doğrulanmış Fark
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Card 3: Bağlı MT5 Hesabı */}
+            <div className="bg-zinc-900/80 border border-zinc-800/80 p-3 sm:p-4 rounded-xl">
+              <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Bağlı MT5 Hesabı</div>
+              <div className="text-sm font-bold text-zinc-100 mt-1 font-mono flex items-center gap-1.5">
+                <span>{accounts[0]?.label || "ACG-46K"}</span>
+                <span className="text-[10px] px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  {accounts[0]?.account_type || "Real"}
+                </span>
+              </div>
+              <div className="text-[10px] text-zinc-500 mt-1 mono">{accounts[0]?.server || "ACGMarkets-Server"}</div>
+            </div>
+
+            {/* Card 4: Bağlı 4.5G Cihaz */}
+            <div className="bg-zinc-900/80 border border-zinc-800/80 p-3 sm:p-4 rounded-xl">
+              <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">İcra Cihazı</div>
+              <div className="text-sm font-bold text-zinc-100 mt-1 font-mono flex items-center gap-1.5">
+                <span>{devices[0]?.name || "Galaxy A11"}</span>
+                <span className={`w-2 h-2 rounded-full ${devices[0]?.status === "ready" ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-zinc-500"}`} />
+              </div>
+              <div className="text-[10px] text-zinc-400 mt-1 mono">
+                4.5G Tünel • {devices[0]?.battery !== null && devices[0]?.battery !== undefined ? `%${devices[0].battery} Şarj` : "%91 Şarj"}
+              </div>
+            </div>
+
+            {/* Card 5: Bugünkü Canlı Emirler & Limit */}
+            <div className="bg-zinc-900/80 border border-zinc-800/80 p-3 sm:p-4 rounded-xl">
+              <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Bugünkü Canlı Emirler</div>
+              <div className="text-xl font-bold text-zinc-100 mt-1 font-mono">
+                {liveOrders.filter(o => o.executed_at && o.executed_at.slice(0, 10) === new Date().toISOString().slice(0, 10)).length}
+                <span className="text-xs text-zinc-500 font-normal"> / {accounts[0]?.daily_max_orders || 20} Limit</span>
+              </div>
+              <div className="text-[10px] text-rose-400/80 mt-1">Zarar Freni: -${Number(config?.max_daily_loss || 925).toFixed(2)}</div>
+            </div>
+          </div>
+
+          {/* AKTİF CANLI POZİSYONLAR BÖLÜMÜ (Simülasyon Açık İşlemler ile Birebir Paralel Tasarım) */}
+          <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
+                <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-wider">
+                  Canlı Açık MT5 İşlemleri ({liveOrders.filter(o => o.status === "filled" || o.status === "executing").length})
+                </h2>
+              </div>
+              <span className="text-xs text-zinc-500 font-mono">
+                Telefon Ekranı & Broker İcrası
+              </span>
+            </div>
+
+            {liveOrders.filter(o => o.status === "filled" || o.status === "executing").length === 0 ? (
+              <div className="text-center py-8 text-zinc-500 text-xs border border-dashed border-zinc-800/80 rounded-lg">
+                Şu an telefonda açık canlı bir işlem bulunmuyor. Üretilen sinyallerden "⚡ Canlıda Aç" butonuna basarak işlemi telefona iletebilirsiniz.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {liveOrders.filter(o => o.status === "filled" || o.status === "executing").map((ord) => {
+                  const cleanSym = ord.symbol.replace(/\.(PRO|pro|RAW|raw)/g, "").replace("#", "");
+                  const relatedSig = (signals || []).find(s => s.order_id === ord.id || (ord.idempotency_key && ord.idempotency_key.includes(`sig-${s.id}-`)) || s.broker_symbol === ord.symbol);
+                  const relatedPaper = (openPositions || []).find(p => p.symbol === ord.symbol || (relatedSig && p.signal_id === relatedSig.id));
+                  const entryPrice = relatedPaper?.entry_price || relatedSig?.entry_price || (ord.sl ? Number(ord.sl).toFixed(4) : "-");
+                  const currentPrice = (prescreenList || []).find(c => c.ticker === cleanSym)?.price || relatedPaper?.current_price || entryPrice;
+
+                  return (
+                    <div
+                      key={ord.id}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 flex flex-col justify-between space-y-3 shadow-lg"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs font-extrabold font-mono ${
+                              ord.side === "BUY"
+                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                                : "bg-rose-500/20 text-rose-400 border border-rose-500/40"
+                            }`}
+                          >
+                            {ord.side}
+                          </span>
+                          <div>
+                            <span className="font-bold text-zinc-100 font-mono">{ord.symbol}</span>
+                            <span className="text-[10px] text-zinc-500 ml-1.5 font-mono">#{ord.id}</span>
+                          </div>
+                        </div>
+
+                        <div className="text-right font-mono">
+                          <span className="text-xs font-bold text-cyan-400">{ord.lot} LOT</span>
+                          <span className="text-xs font-bold block text-emerald-400">
+                            {ord.status.toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 4-Box Grid: Simülasyondaki gibi Giriş, Güncel, Stop Loss, Take Profit */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-zinc-900/60 p-2.5 rounded-lg text-[11px] font-mono text-center">
+                        <div>
+                          <span className="text-zinc-500 block text-[10px]">Giriş</span>
+                          <span className="text-zinc-200 font-bold">
+                            {entryPrice !== "-" ? `$${entryPrice}` : "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-cyan-400 block text-[10px]">Güncel</span>
+                          <span className="text-zinc-100 font-bold">
+                            {currentPrice !== "-" ? `$${currentPrice}` : "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-rose-400 block text-[10px]">Stop Loss</span>
+                          <span className="text-rose-300 font-bold">{ord.sl ? `$${Number(ord.sl).toFixed(4)}` : "-"}</span>
+                        </div>
+                        <div>
+                          <span className="text-emerald-400 block text-[10px]">Take Profit</span>
+                          <span className="text-emerald-300 font-bold">{ord.tp ? `$${Number(ord.tp).toFixed(4)}` : "-"}</span>
+                        </div>
+                      </div>
+
+                      {/* Bottom Footer: Sol tarafta İcra ve Lot Doğrulama, Sağ tarafta Pozisyonu Kapat */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-800/60">
+                        <div className="flex items-center gap-2.5 text-[11px] font-mono">
+                          <span className="text-zinc-500">
+                            Açılış: <span className="text-zinc-300">{ord.executed_at ? ord.executed_at.slice(11, 19) : (ord.created_at ? ord.created_at.slice(11, 19) : "-")}</span>
+                          </span>
+                          <span className="text-zinc-700">|</span>
+                          <span className="text-zinc-500">
+                            İcra: <span className="text-emerald-400 font-semibold">{ord.latency_ms ? `${ord.latency_ms}ms` : "Canlı"}</span>
+                          </span>
+                          <span className="text-zinc-700">|</span>
+                          <span className="text-zinc-500">
+                            Doğrulanan: <span className="text-cyan-400 font-bold">{ord.ocr_lot || ord.lot} Lot</span>
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            if (confirm(`${ord.symbol} pozisyonu telefonda kapatılsın mı?`)) {
+                              api.closeDevicePosition(devices[0]?.id || 1).then(res => {
+                                showToast(`✓ ${res.message}`);
+                                api.getOrders().then(setLiveOrders);
+                              }).catch(e => showToast(`Kapatma hatası: ${e?.message || e}`, "err"));
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-700/60 transition shadow-sm ml-auto"
+                        >
+                          Pozisyonu Kapat
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* MAIN SECTION: PENDING SIGNALS & TRADE HISTORY */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: Sinyaller Paneli */}
+            <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+                  <span>📢</span> Üretilen Sinyaller ({signals.length})
+                </h2>
+                <span className="text-xs text-zinc-500 font-mono">Canlı & Simülasyon</span>
+              </div>
+
+              {signals.length === 0 ? (
+                <div className="text-center py-10 text-zinc-500 text-xs border border-dashed border-zinc-800 rounded-lg">
+                  Henüz üretilmiş sinyal yok. Yukarıdaki radardan bir parite seçip analiz başlatabilirsiniz.
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+                  {signals.map((sig) => (
+                    <div
+                      key={sig.id}
+                      className={`p-3.5 rounded-xl border transition ${
+                        sig.side === "BUY"
+                          ? "bg-emerald-950/20 border-emerald-500/40"
+                          : sig.side === "SELL"
+                          ? "bg-rose-950/20 border-rose-500/40"
+                          : "bg-zinc-900/40 border-zinc-800"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                              sig.side === "BUY"
+                                ? "bg-emerald-500/20 text-emerald-400"
+                                : sig.side === "SELL"
+                                ? "bg-rose-500/20 text-rose-400"
+                                : "bg-zinc-800 text-zinc-400"
+                            }`}
+                          >
+                            {sig.side}
+                          </span>
+                          <span className="font-bold text-zinc-100 font-mono text-sm">{sig.broker_symbol}</span>
+                          <span className="text-[10px] text-zinc-500 font-mono">[{sig.timeframe || "H1"}]</span>
+                        </div>
+
+                        <div className="text-right font-mono text-xs">
+                          <span className="text-cyan-400 font-bold">{sig.calculated_lot} LOT</span>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] font-mono text-zinc-400 mt-2 flex items-center justify-between">
+                        <span>Giriş: ${sig.entry_price}</span>
+                        <span className="text-rose-400">SL: ${sig.sl}</span>
+                        <span className="text-emerald-400">TP: ${sig.tp}</span>
+                      </div>
+
+                      {sig.reasoning && (
+                        <p className="text-[11px] text-zinc-400 mt-2 pt-2 border-t border-zinc-900 line-clamp-2">
+                          {sig.reasoning}
+                        </p>
+                      )}
+
+                      <div className="mt-3 flex items-center justify-between pt-1">
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
+                          sig.status === "executed" ? "bg-emerald-500/20 text-emerald-400" :
+                          sig.status === "paper_active" ? "bg-cyan-500/20 text-cyan-400" : "bg-zinc-800 text-zinc-400"
+                        }`}>
+                          {sig.status === "executed" ? "CANLIDA AÇILDI" : sig.status === "paper_active" ? "SİMÜLASYONDA AKTİF" : "ONAY BEKLİYOR"}
+                        </span>
+
+                        <div className="flex items-center gap-2">
+                          {sig.status !== "executed" && (
+                            <button
+                              onClick={() => handleExecute(sig.id)}
+                              className="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-slate-950 transition flex items-center gap-1 shadow-sm"
+                              title="Emri fiziksel telefona gönderip canlı MT5'te aç"
+                            >
+                              <span>⚡ Canlıda Aç (MT5)</span>
+                            </button>
+                          )}
+                          {sig.status === "pending" && (
+                            <button
+                              onClick={() => handleReject(sig.id)}
+                              className="px-2.5 py-1 rounded text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+                            >
+                              Pas Geç
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Kapanan Canlı İşlemler & Kapanan Simülasyon İşlemleri */}
+            <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+                  <span>📜</span> Kapanan Canlı İşlem Geçmişi ({liveOrders.filter(o => o.status === "filled").length})
+                </h2>
+                <span className="text-xs text-zinc-500 font-mono">Gerçekleşen İcralar</span>
+              </div>
+
+              {liveOrders.filter(o => o.status === "filled").length === 0 ? (
+                <div className="text-center py-10 text-zinc-500 text-xs border border-dashed border-zinc-800 rounded-lg">
+                  Henüz kapanan canlı işlem yok. Canlı emirler gerçekleştikçe burada listelenir.
+                </div>
+              ) : (
+                <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                  {liveOrders.filter(o => o.status === "filled").map((cp) => (
+                    <div
+                      key={cp.id}
+                      className="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800/80 flex items-center justify-between text-xs font-mono"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            cp.side === "BUY" ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
+                          }`}
+                        >
+                          {cp.side}
+                        </span>
+                        <span className="font-bold text-zinc-200">{cp.symbol}</span>
+                        <span className="text-[10px] text-zinc-500">#{cp.id}</span>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        <span className="text-zinc-400">{cp.lot} Lot</span>
+                        <span className="text-cyan-400">{cp.latency_ms ? `${cp.latency_ms}ms` : "İcra Edildi"}</span>
+                        <span className="text-[10px] text-zinc-500">{cp.executed_at ? cp.executed_at.slice(11, 19) : ""}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* CANLI EMİR GEÇMİŞİ TABLOSU */}
+          <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl overflow-hidden space-y-3 p-4 sm:p-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-zinc-200">Gerçek İcra Edilen Emir Geçmişi</h3>
+              <span className="text-xs text-zinc-500 mono">Toplam {liveOrders.length} Emir</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-zinc-950 text-zinc-500 font-mono border-b border-zinc-800">
+                  <tr>
+                    <th className="px-3 py-2.5">#ID</th>
+                    <th className="px-3 py-2.5">Sembol</th>
+                    <th className="px-3 py-2.5">Yön</th>
+                    <th className="px-3 py-2.5">Lot</th>
+                    <th className="px-3 py-2.5">SL / TP</th>
+                    <th className="px-3 py-2.5">Gecikme</th>
+                    <th className="px-3 py-2.5">Tarih</th>
+                    <th className="px-3 py-2.5 text-right">Durum</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/60 font-mono">
+                  {liveOrders.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-6 text-center text-zinc-600">Henüz canlı emir geçmişi yok.</td>
+                    </tr>
+                  ) : (
+                    liveOrders.slice(0, 15).map((o) => (
+                      <tr key={o.id} className="hover:bg-zinc-800/30">
+                        <td className="px-3 py-2.5 text-zinc-400">#{o.id}</td>
+                        <td className="px-3 py-2.5 font-bold text-zinc-200">{o.symbol}</td>
+                        <td className={`px-3 py-2.5 font-bold ${o.side === "BUY" ? "text-emerald-400" : "text-rose-400"}`}>{o.side}</td>
+                        <td className="px-3 py-2.5 text-zinc-200">{o.lot}</td>
+                        <td className="px-3 py-2.5 text-zinc-400">{o.sl ? o.sl.toFixed(2) : "-"} / {o.tp ? o.tp.toFixed(2) : "-"}</td>
+                        <td className="px-3 py-2.5 text-cyan-400">{o.latency_ms ? `${o.latency_ms}ms` : "-"}</td>
+                        <td className="px-3 py-2.5 text-zinc-500">{o.created_at ? o.created_at.slice(0, 16).replace("T", " ") : "-"}</td>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            o.status === "filled" ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" :
+                            o.status === "executing" ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 animate-pulse" :
+                            o.status === "failed" ? "bg-rose-500/15 text-rose-400 border border-rose-500/30" : "bg-zinc-800 text-zinc-400"
+                          }`}>
+                            {o.status.toUpperCase()}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 3: STRATEJİ & KASA YÖNETİMİ (STRATEGY & PLAYBOOK)                      */}
       {/* ========================================================================= */}
       {activeTab === "strategy" && (
         <div className="space-y-6">

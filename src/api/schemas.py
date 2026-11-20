@@ -129,7 +129,7 @@ class LogOut(BaseModel):
 
 class SystemStateOut(BaseModel):
     kill_switch: bool
-    dry_run: bool
+    dry_run: bool = False
     webhook_secret: str
     total_balance: float
     active_devices: int
@@ -148,3 +148,5 @@ class SettingsUpdate(BaseModel):
     github_repo_url: Optional[str] = None
     github_branch: Optional[str] = None
     github_token: Optional[str] = None
+    market_data_source: Optional[str] = None
+    data_poll_interval: Optional[int] = None

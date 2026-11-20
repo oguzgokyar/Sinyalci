@@ -99,6 +99,22 @@ def to_trading_ticker(ticker: str) -> str:
     return t
 
 
+def to_biquote_ticker(ticker: str) -> str:
+    """Map ACG Markets MT5 symbols to Biquote MT5 ticker format."""
+    t = ticker.upper().replace(".PRO", "").replace(".pro", "").replace(".RAW", "").replace(".raw", "").replace("#", "").strip()
+    mapping = {
+        "NAS100": "USTEC",
+        "NDX": "USTEC",
+        "NQ": "USTEC",
+        "GER30": "DE30",
+        "GER40": "DE30",
+        "DAX": "DE30",
+        "GOLD": "XAUUSD",
+        "SILVER": "XAGUSD",
+    }
+    return mapping.get(t, t)
+
+
 class StrategyEngine:
     def __init__(self, db: Any, tradingagents_url: Optional[str] = None) -> None:
         self.db = db
@@ -108,6 +124,7 @@ class StrategyEngine:
             or os.environ.get("TRADINGAGENTS_URL")
             or "http://10.0.1.1:3200"
         )
+        self.dm: Optional[Any] = None
 
     def get_config(self) -> dict[str, Any]:
         balance = float(self.db.get_setting("strategy_balance", "46250.0"))
@@ -127,7 +144,10 @@ class StrategyEngine:
         tf = self.db.get_setting("strategy_timeframe", "H1")
         paper_trading = self.db.get_setting("strategy_paper_trading", "1") == "1"
         autopilot_enabled = self.db.get_setting("strategy_autopilot_enabled", "1") == "1"
+        live_autopilot_enabled = self.db.get_setting("strategy_live_autopilot_enabled", "0") == "1"
         last_autopilot = self.db.get_setting("strategy_last_autopilot_run", "")
+        market_data_source = self.db.get_setting("market_data_source", "biquote")
+        data_poll_interval = int(self.db.get_setting("data_poll_interval", "10"))
 
         return {
             "balance": balance,
@@ -138,6 +158,7 @@ class StrategyEngine:
             "symbol_suffix": suffix,
             "auto_execute": auto_exec,
             "autopilot_enabled": autopilot_enabled,
+            "live_autopilot_enabled": live_autopilot_enabled,
             "last_autopilot_run": last_autopilot,
             "timeframe": tf,
             "paper_trading": paper_trading,
@@ -146,7 +167,41 @@ class StrategyEngine:
             "acg_symbols": ACG_MARKETS_SYMBOLS,
             "max_daily_loss": max_daily_loss,
             "tradingagents_url": self.tradingagents_url,
+            "market_data_source": market_data_source,
+            "data_poll_interval": data_poll_interval,
         }
+
+    async def check_tradingagents_health(self, timeout: float = 3.0) -> dict[str, Any]:
+        """Check reachability and response latency of TradingAgents server."""
+        import time
+        health_url = f"{self.tradingagents_url}/health"
+        loop = asyncio.get_running_loop()
+        t0 = time.perf_counter()
+        try:
+            req = urllib.request.Request(health_url, headers={"User-Agent": "Sinyalci/1.0"})
+            resp_bytes = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=timeout).read())
+            elapsed = round((time.perf_counter() - t0) * 1000)
+            data = json.loads(resp_bytes.decode("utf-8"))
+            return {
+                "healthy": True,
+                "status": data.get("status", "healthy"),
+                "service": data.get("service", "tradingagents-webui"),
+                "version": data.get("version", "0.1.0"),
+                "latency_ms": elapsed,
+                "url": self.tradingagents_url,
+                "error": None,
+            }
+        except Exception as e:
+            elapsed = round((time.perf_counter() - t0) * 1000)
+            return {
+                "healthy": False,
+                "status": "offline",
+                "service": "tradingagents-webui",
+                "version": None,
+                "latency_ms": elapsed,
+                "url": self.tradingagents_url,
+                "error": str(e),
+            }
 
     def update_config(self, data: dict[str, Any]) -> dict[str, Any]:
         if "balance" in data:
@@ -161,6 +216,8 @@ class StrategyEngine:
             self.db.set_setting("strategy_auto_execute", "1" if data["auto_execute"] else "0")
         if "autopilot_enabled" in data:
             self.db.set_setting("strategy_autopilot_enabled", "1" if data["autopilot_enabled"] else "0")
+        if "live_autopilot_enabled" in data:
+            self.db.set_setting("strategy_live_autopilot_enabled", "1" if data["live_autopilot_enabled"] else "0")
         if "timeframe" in data:
             self.db.set_setting("strategy_timeframe", str(data["timeframe"]).upper())
         if "paper_trading" in data:
@@ -177,6 +234,10 @@ class StrategyEngine:
                 self.db.set_setting("strategy_favorites", str(data["favorites"]))
         if "max_daily_loss" in data:
             self.db.set_setting("strategy_max_daily_loss", str(float(data["max_daily_loss"])))
+        if "market_data_source" in data:
+            self.db.set_setting("market_data_source", str(data["market_data_source"]).strip().lower())
+        if "data_poll_interval" in data:
+            self.db.set_setting("data_poll_interval", str(int(data["data_poll_interval"])))
 
         return self.get_config()
 
@@ -377,6 +438,54 @@ class StrategyEngine:
         return signal_record
 
     def fetch_live_chart(self, ticker: str, interval: str = "1h", range_: str = "5d") -> Optional[dict[str, Any]]:
+        """Fetch live candle data and current price from selected source (Biquote MT5 feed or Yahoo)."""
+        source = self.db.get_setting("market_data_source", "biquote").lower()
+        if source == "biquote":
+            res = self.fetch_biquote_chart(ticker, interval=interval)
+            if res and res.get("price", 0) > 0:
+                return res
+        # Fallback or primary Yahoo Finance
+        return self.fetch_yahoo_chart(ticker, interval=interval, range_=range_)
+
+    def fetch_biquote_chart(self, ticker: str, interval: str = "1h") -> Optional[dict[str, Any]]:
+        """Fetch real-time MT5 tick & OHLC data from Biquote."""
+        clean_ticker = to_biquote_ticker(ticker)
+        # 1. Fetch live snapshot (bid/ask/mid)
+        snap_url = f"https://biquote.io/api/{clean_ticker}"
+        req_snap = urllib.request.Request(snap_url, headers={"User-Agent": "Sinyalci/1.0"})
+        price = 0.0
+        try:
+            with urllib.request.urlopen(req_snap, timeout=4) as resp:
+                data = json.loads(resp.read().decode())
+                price = float(data.get("mid") or data.get("bid") or 0.0)
+        except Exception as e:
+            logger.debug("Biquote snapshot error for %s: %s", clean_ticker, e)
+
+        # 2. Fetch OHLC candle bars
+        bq_interval = "1h" if interval in ("1h", "60m") else ("4h" if interval == "4h" else "1d")
+        ohlc_url = f"https://biquote.io/api/{clean_ticker}/ohlc?interval={bq_interval}&limit=50"
+        req_ohlc = urllib.request.Request(ohlc_url, headers={"User-Agent": "Sinyalci/1.0"})
+        try:
+            with urllib.request.urlopen(req_ohlc, timeout=5) as resp:
+                ohlc_data = json.loads(resp.read().decode())
+                bars = ohlc_data.get("bars", [])
+                # Bars come newest first or chronological, ensure ascending order
+                bars = list(reversed(bars)) if bars and bars[0].get("openTime", "") > bars[-1].get("openTime", "") else bars
+                closes = [float(b["close"]) for b in bars if "close" in b]
+                highs = [float(b["high"]) for b in bars if "high" in b]
+                lows = [float(b["low"]) for b in bars if "low" in b]
+                if price <= 0 and closes:
+                    price = closes[-1]
+                if price > 0 and len(closes) >= 15:
+                    return {"symbol": clean_ticker, "price": price, "closes": closes, "highs": highs, "lows": lows, "source": "biquote"}
+        except Exception as e:
+            logger.debug("Biquote OHLC error for %s: %s", clean_ticker, e)
+
+        if price > 0:
+            return {"symbol": clean_ticker, "price": price, "closes": [], "highs": [], "lows": [], "source": "biquote"}
+        return None
+
+    def fetch_yahoo_chart(self, ticker: str, interval: str = "1h", range_: str = "5d") -> Optional[dict[str, Any]]:
         """Fetch live candle data and current price from Yahoo Finance."""
         sym = to_trading_ticker(ticker)
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={interval}&range={range_}"
@@ -391,7 +500,7 @@ class StrategyEngine:
                 highs = [float(h) for h in quote.get("high", []) if h is not None]
                 lows = [float(l) for l in quote.get("low", []) if l is not None]
                 price = meta.get("regularMarketPrice") or (closes[-1] if closes else 0.0)
-                return {"symbol": sym, "price": float(price), "closes": closes, "highs": highs, "lows": lows}
+                return {"symbol": sym, "price": float(price), "closes": closes, "highs": highs, "lows": lows, "source": "yahoo"}
         except Exception as e:
             logger.warning("Could not fetch Yahoo chart for %s (%s): %s", ticker, sym, e)
             return None
@@ -560,6 +669,26 @@ class StrategyEngine:
                 if ws_hub:
                     await ws_hub.broadcast("paper_position_closed", closed)
                 updated.append(closed)
+
+                # DUAL-TRACK LOCKSTEP: Synchronously close live physical MT5 position on phone
+                if hasattr(self, "dm") and self.dm:
+                    try:
+                        clean_sym = sym.upper().replace(".PRO", "").replace(".RAW", "").replace("#", "").strip()
+                        active_orders = self.db.list_orders(limit=50)
+                        target_live = next(
+                            (o for o in active_orders if o.get("status") in ("filled", "executing")
+                             and o.get("symbol", "").upper().replace(".PRO", "").replace(".RAW", "").replace("#", "").strip() == clean_sym),
+                            None
+                        )
+                        if target_live:
+                            asyncio.create_task(self.dm.close_position_async(target_live["device_id"], symbol=target_live.get("symbol", sym)))
+                        else:
+                            devs = self.db.list_devices()
+                            ready_dev = next((d for d in devs if d.get("status") in ("ready", "busy")), None)
+                            if ready_dev:
+                                asyncio.create_task(self.dm.close_position_async(ready_dev["id"], symbol=sym))
+                    except Exception as exc:
+                        logger.warning("Failed to dispatch live position close for %s: %s", sym, exc)
             else:
                 self.db.update_paper_position_price(pos["id"], current_price=current_price, pnl=pnl)
                 pos["current_price"] = current_price
@@ -636,6 +765,38 @@ class StrategyEngine:
             )
             if ws_hub:
                 await ws_hub.broadcast("paper_position_opened", paper_pos)
+
+        # 7. If live autopilot is enabled, dispatch order to physical mobile device
+        if cfg.get("live_autopilot_enabled") and signal["side"] in ["BUY", "SELL"]:
+            try:
+                import secrets
+                devices = self.db.list_devices()
+                accounts = self.db.list_accounts()
+                ready_device = next((d for d in devices if d["status"] in ["ready", "busy", "offline"]), None)
+                enabled_account = next((a for a in accounts if a["enabled"]), None)
+                dev_id = ready_device["id"] if ready_device else 1
+                acc_id = enabled_account["id"] if enabled_account else 1
+
+                order_data = {
+                    "account_id": acc_id,
+                    "device_id": dev_id,
+                    "symbol": signal["broker_symbol"],
+                    "side": signal["side"],
+                    "lot": signal["calculated_lot"],
+                    "sl": signal["sl"],
+                    "tp": signal["tp"],
+                    "idempotency_key": f"sig-{signal['id']}-{secrets.token_hex(4)}",
+                }
+                order = self.db.create_order(order_data)
+                self.db.update_signal_status(signal["id"], status="executed", order_id=order["id"])
+                self.db.add_log(f"Canlı Otopilot Emre Dönüştürdü: #{order['id']} ({signal['broker_symbol']} {signal['side']} {signal['calculated_lot']} Lot)", level="INFO")
+                if ws_hub:
+                    await ws_hub.broadcast("signal_executed", {"signal_id": signal["id"], "order": order})
+                # Asenkron canlı icrayı fiziksel cihaza gönder
+                if hasattr(self, "dm") and self.dm:
+                    asyncio.create_task(self.dm.execute_order_async(order["id"]))
+            except Exception as e:
+                logger.error("Live autopilot order dispatch failed: %s", e)
 
         return signal
 

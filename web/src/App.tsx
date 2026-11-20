@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, connectWS } from "./api";
-import type { SystemState } from "./types";
+import type { SystemState, TradingAgentsHealth } from "./types";
 import Overview from "./pages/Overview";
 import Devices from "./pages/Devices";
 import Orders from "./pages/Orders";
@@ -14,13 +14,20 @@ export default function App() {
   const [page, setPage] = useState<Page>("overview");
   const [state, setState] = useState<SystemState | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [taHealth, setTaHealth] = useState<TradingAgentsHealth | null>(null);
 
   const refreshState = () => {
     api.getSystem().then(setState).catch(() => {});
   };
 
+  const refreshTAHealth = () => {
+    api.getTradingAgentsHealth().then(setTaHealth).catch(() => setTaHealth(null));
+  };
+
   useEffect(() => {
     refreshState();
+    refreshTAHealth();
+    const interval = setInterval(refreshTAHealth, 25000);
     const unsub = connectWS((event, data) => {
       if (event === "system_state") {
         setState(data as SystemState);
@@ -28,7 +35,10 @@ export default function App() {
         refreshState();
       }
     });
-    return unsub;
+    return () => {
+      clearInterval(interval);
+      unsub();
+    };
   }, []);
 
   const toggleKillSwitch = async () => {
@@ -38,16 +48,9 @@ export default function App() {
     setState(updated);
   };
 
-  const toggleDryRun = async () => {
-    if (!state) return;
-    const next = !state.dry_run;
-    const updated = await api.setDryRun(next);
-    setState(updated);
-  };
-
   const navItems: Array<{ id: Page; label: string; icon: string }> = [
     { id: "overview", label: "Genel Bakış", icon: "📊" },
-    { id: "strategy", label: "Strateji & Sinyaller", icon: "🎯" },
+    { id: "strategy", label: "İşlemler", icon: "📈" },
     { id: "devices", label: "Cihazlar", icon: "📱" },
     { id: "orders", label: "Emirler", icon: "⚡" },
     { id: "logs", label: "Kayıtlar", icon: "📜" },
@@ -99,17 +102,18 @@ export default function App() {
 
         {/* Desktop Master Switches */}
         <div className="hidden lg:flex items-center gap-3">
-          {/* Dry Run Toggle */}
-          <button
-            onClick={toggleDryRun}
-            className={`px-3 py-1 rounded text-xs font-semibold font-mono border transition ${
-              state?.dry_run
-                ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
-                : "bg-zinc-800/50 border-zinc-700 text-zinc-400"
+          {/* TradingAgents Status Pill */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono border transition ${
+              taHealth?.healthy
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                : "bg-rose-500/10 border-rose-500/30 text-rose-400"
             }`}
+            title={taHealth?.url || "TradingAgents AI Analiz Motoru"}
           >
-            {state?.dry_run ? "DRY-RUN: ON (Simülasyon)" : "DRY-RUN: OFF (Fiziksel)"}
-          </button>
+            <span className={`w-2 h-2 rounded-full ${taHealth?.healthy ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-rose-500"}`} />
+            <span>AI: {taHealth?.healthy ? `${taHealth.latency_ms}ms` : "Çevrimdışı"}</span>
+          </div>
 
           {/* Master Kill-Switch */}
           <button
@@ -196,19 +200,6 @@ export default function App() {
                 Sistem Kontrolleri
               </span>
 
-              {/* Dry-Run Mobile Toggle */}
-              <button
-                onClick={toggleDryRun}
-                className={`w-full py-2.5 px-3 rounded-xl text-xs font-semibold font-mono border transition flex items-center justify-between ${
-                  state?.dry_run
-                    ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
-                    : "bg-zinc-900 border-zinc-800 text-zinc-400"
-                }`}
-              >
-                <span>Dry-Run (Simülasyon)</span>
-                <span className="font-bold">{state?.dry_run ? "ON" : "OFF"}</span>
-              </button>
-
               {/* Kill-Switch Mobile Toggle */}
               <button
                 onClick={toggleKillSwitch}
@@ -222,7 +213,13 @@ export default function App() {
                 <span>{state?.kill_switch ? "AKTİF" : "KILL-SWITCH"}</span>
               </button>
 
-              <div className="text-[10px] text-zinc-500 text-center font-mono pt-1">
+              <div className="flex items-center justify-between text-[11px] font-mono px-1 text-zinc-400 pt-1">
+                <span>AI Analiz:</span>
+                <span className={taHealth?.healthy ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"}>
+                  {taHealth?.healthy ? `Aktif (${taHealth.latency_ms}ms)` : "Çevrimdışı"}
+                </span>
+              </div>
+              <div className="text-[10px] text-zinc-500 text-center font-mono">
                 Ortam: {state?.env_mode === "vps" ? "VPS (Bulut)" : "Lokal (PC)"}
               </div>
             </div>

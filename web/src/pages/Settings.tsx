@@ -13,6 +13,8 @@ export default function Settings({ onStateChange }: { onStateChange?: (s: System
   const [repoUrl, setRepoUrl] = useState("");
   const [branch, setBranch] = useState("master");
   const [ghToken, setGhToken] = useState("");
+  const [marketDataSource, setMarketDataSource] = useState<"biquote" | "yahoo">("biquote");
+  const [dataPollInterval, setDataPollInterval] = useState("10");
 
   // Action states
   const [saveMsg, setSaveMsg] = useState("");
@@ -25,7 +27,7 @@ export default function Settings({ onStateChange }: { onStateChange?: (s: System
 
   const loadAll = async () => {
     try {
-      const [e, g] = await Promise.all([api.getEnvironment(), api.getGitHubStatus()]);
+      const [e, g, cfg] = await Promise.all([api.getEnvironment(), api.getGitHubStatus(), api.getStrategyConfig()]);
       setEnvInfo(e);
       setGhInfo(g);
       setModeOverride((e.env_mode_override as "auto" | "local" | "vps") || "auto");
@@ -33,6 +35,14 @@ export default function Settings({ onStateChange }: { onStateChange?: (s: System
       setVpsUrl(e.vps_public_url || "");
       setRepoUrl(g.repo_url || "");
       setBranch(g.branch || "master");
+      const effectiveSource = (e as any).market_data_source || (cfg as any).market_data_source;
+      if (effectiveSource) {
+        setMarketDataSource(effectiveSource);
+      }
+      const effectiveInterval = (e as any).data_poll_interval || (cfg as any).data_poll_interval;
+      if (effectiveInterval) {
+        setDataPollInterval(String(effectiveInterval));
+      }
     } catch (err: unknown) {
       setErrMsg(err instanceof Error ? err.message : String(err));
     }
@@ -53,6 +63,8 @@ export default function Settings({ onStateChange }: { onStateChange?: (s: System
         vps_public_url: vpsUrl.trim(),
         github_repo_url: repoUrl.trim(),
         github_branch: branch.trim() || "master",
+        market_data_source: marketDataSource,
+        data_poll_interval: dataPollInterval,
       };
       if (ghToken.trim()) {
         payload.github_token = ghToken.trim();
@@ -105,15 +117,6 @@ export default function Settings({ onStateChange }: { onStateChange?: (s: System
   };
 
   const activeMode = envInfo?.env.mode ?? "local";
-  const effectiveWsHost = vpsUrl.trim() || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const termuxCmd = `python phone_agent.py --server ${effectiveWsHost.replace(/\/$/, "")}/ws/agent/galaxy_a11 --token ${agentToken}`;
-
-  const copyTermuxCmd = () => {
-    navigator.clipboard.writeText(termuxCmd).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
-  };
 
   return (
     <div className="space-y-6">
@@ -218,43 +221,43 @@ export default function Settings({ onStateChange }: { onStateChange?: (s: System
               />
             </div>
 
-            <div className="p-3 rounded bg-zinc-950 border border-zinc-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400 font-medium">Telefon (Termux) Bağlantı Komutu</span>
-                <button
-                  type="button"
-                  onClick={copyTermuxCmd}
-                  className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
-                >
-                  {copied ? "Kopyalandı!" : "Kopyala"}
-                </button>
+            {/* Veri Kaynağı ve Güncelleme Sıklığı Seçimi */}
+            <div className="p-3 rounded bg-zinc-950 border border-zinc-800 space-y-3">
+              <div className="font-semibold text-zinc-200 flex items-center justify-between">
+                <span>📡 Piyasa Veri Kaynağı & Canlı Besleme</span>
+                <span className="text-[10px] text-cyan-400 font-mono">Biquote / Yahoo</span>
               </div>
-              <pre className="text-[11px] text-emerald-400 mono overflow-x-auto whitespace-pre-wrap break-all">
-                {termuxCmd}
-              </pre>
-            </div>
-
-            {/* Bağlı 4.5G Telefon Ajanları */}
-            <div className="pt-2">
-              <div className="text-zinc-400 font-medium mb-2">
-                Bağlı 4.5G Telefon Ajanları ({envInfo?.agents.length ?? 0})
-              </div>
-              {!envInfo || envInfo.agents.length === 0 ? (
-                <div className="text-zinc-500 italic">Şu an WebSocket üzerinden bağlı uzak telefon yok.</div>
-              ) : (
-                <div className="space-y-1.5">
-                  {envInfo.agents.map((ag) => (
-                    <div
-                      key={ag.device_id}
-                      className="flex items-center justify-between p-2 rounded bg-zinc-950 border border-zinc-800 mono"
-                    >
-                      <span className="text-emerald-400 font-semibold">{ag.device_id}</span>
-                      <span className="text-zinc-400">{ag.model} · {ag.ip}</span>
-                      <span className="text-zinc-300">{ag.battery !== null ? `%${ag.battery}` : "-"}</span>
-                    </div>
-                  ))}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-zinc-400 mb-1">Veri Sağlayıcı</label>
+                  <select
+                    value={marketDataSource}
+                    onChange={(e) => setMarketDataSource(e.target.value as "biquote" | "yahoo")}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-zinc-100 font-mono"
+                  >
+                    <option value="biquote">Biquote (Canlı MT5 Feed - Önerilen)</option>
+                    <option value="yahoo">Yahoo Finance (Klasik Spot)</option>
+                  </select>
                 </div>
-              )}
+                <div>
+                  <label className="block text-zinc-400 mb-1">Veri Çekme Sıklığı</label>
+                  <select
+                    value={dataPollInterval}
+                    onChange={(e) => setDataPollInterval(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-zinc-100 font-mono"
+                  >
+                    <option value="1">1 Saniye (Ultra Canlı)</option>
+                    <option value="3">3 Saniye (Hızlı)</option>
+                    <option value="5">5 Saniye (Dengeli)</option>
+                    <option value="10">10 Saniye (Standart)</option>
+                    <option value="15">15 Saniye (Geniş)</option>
+                    <option value="30">30 Saniye (Tasarruf)</option>
+                  </select>
+                </div>
+              </div>
+              <p className="text-[10px] text-zinc-500">
+                Biquote doğrudan MetaTrader 5 sunucularından anlık gerçek tick ve spread kotasyonlarını aktarır.
+              </p>
             </div>
           </div>
 

@@ -32,6 +32,8 @@ def detect_environment(
     override = env_override.strip().lower()
     if override in ("local", "vps"):
         mode: Literal["local", "vps"] = override  # type: ignore
+    elif is_docker is False and current_os == "Windows":
+        mode = "local"
     elif effective_docker or os.getenv("TRADER_ENV", "").lower() == "vps":
         mode = "vps"
     elif current_os == "Windows":
@@ -54,7 +56,8 @@ def build_checklist(
     agent_count: int = 0,
     agent_token: str = "",
     kill_switch: bool = False,
-    dry_run: bool = True,
+    dry_run: bool = False,
+    **kwargs: Any,
 ) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
 
@@ -141,16 +144,24 @@ def build_checklist(
         ),
     })
 
-    # 5. Dry-Run Flag
-    checks.append({
-        "key": "dry_run",
-        "title": "Çalışma Modu",
-        "ok": True,
-        "message": (
-            "DRY-RUN (Simülasyon): Emirlere fiziksel dokunulmaz."
-            if dry_run
-            else "CANLI İCRA: Emirler fiziksel olarak telefona gönderilir."
-        ),
-    })
+    # 5. TradingAgents AI Engine Check
+    ta_url = os.environ.get("TRADINGAGENTS_URL", "http://10.0.1.1:3200")
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"{ta_url}/health", headers={"User-Agent": "Sinyalci/1.0"})
+        with urllib.request.urlopen(req, timeout=1.5) as r:
+            checks.append({
+                "key": "tradingagents",
+                "title": "TradingAgents AI Analiz Motoru",
+                "ok": r.status == 200,
+                "message": f"AI motoru aktif ve yanıt veriyor ({ta_url})." if r.status == 200 else f"HTTP {r.status}",
+            })
+    except Exception:
+        checks.append({
+            "key": "tradingagents",
+            "title": "TradingAgents AI Analiz Motoru",
+            "ok": False,
+            "message": f"TradingAgents AI motoruna ulaşılamıyor ({ta_url}). Otopilot güvenli beklemede.",
+        })
 
     return checks

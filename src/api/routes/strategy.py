@@ -21,6 +21,9 @@ class StrategyConfigUpdate(BaseModel):
     timeframe: Optional[str] = None
     paper_trading: Optional[bool] = None
     autopilot_enabled: Optional[bool] = None
+    live_autopilot_enabled: Optional[bool] = None
+    market_data_source: Optional[str] = None
+    data_poll_interval: Optional[int] = None
     watchlist: Optional[list[str]] = None
     favorites: Optional[list[str]] = None
     max_daily_loss: Optional[float] = None
@@ -39,13 +42,22 @@ class ClosePaperRequest(BaseModel):
 
 def get_engine(request: Request) -> StrategyEngine:
     db = request.app.state.db
-    return StrategyEngine(db)
+    engine = StrategyEngine(db)
+    engine.dm = getattr(request.app.state, "dm", None)
+    return engine
 
 
 @router.get("/config")
 async def get_strategy_config(request: Request):
     engine = get_engine(request)
     return engine.get_config()
+
+
+@router.get("/health")
+async def get_strategy_health(request: Request):
+    """Get real-time health and latency of TradingAgents AI backend."""
+    engine = get_engine(request)
+    return await engine.check_tradingagents_health()
 
 
 @router.post("/config")
@@ -101,6 +113,7 @@ async def list_paper_trades(request: Request, limit: int = 50):
 async def close_paper_trade(position_id: int, payload: ClosePaperRequest, request: Request):
     db = request.app.state.db
     ws_hub = request.app.state.ws
+    dm = request.app.state.dm
     positions = db.list_paper_positions()
     target = next((p for p in positions if p["id"] == position_id), None)
     if not target:
@@ -109,6 +122,25 @@ async def close_paper_trade(position_id: int, payload: ClosePaperRequest, reques
     close_price = payload.close_price if payload.close_price is not None else float(target.get("current_price") or target.get("entry_price") or 0.0)
     closed = db.close_paper_position(position_id, close_price=close_price, close_status=payload.status or "closed_manual")
     await ws_hub.broadcast("paper_position_closed", closed)
+
+    # Synchronously close active live order on phone if exists
+    try:
+        active_orders = db.list_orders(limit=50)
+        clean_target = target["symbol"].upper().replace(".PRO", "").replace(".RAW", "").replace("#", "").strip()
+        target_live = next(
+            (o for o in active_orders if o.get("status") in ("filled", "executing") and o.get("symbol", "").upper().replace(".PRO", "").replace(".RAW", "").replace("#", "").strip() == clean_target),
+            None
+        )
+        if target_live and dm:
+            asyncio.create_task(dm.close_position_async(target_live["device_id"], symbol=target["symbol"]))
+        elif dm:
+            devs = db.list_devices()
+            ready_dev = next((d for d in devs if d.get("status") in ("ready", "busy")), None)
+            if ready_dev:
+                asyncio.create_task(dm.close_position_async(ready_dev["id"], symbol=target["symbol"]))
+    except Exception as exc:
+        pass
+
     return {"status": "closed", "position": closed}
 
 
@@ -146,8 +178,8 @@ async def scan_ticker(payload: ScanRequest, request: Request, background_tasks: 
                 db.add_log(f"Sanal Pozisyon Açıldı: {signal['broker_symbol']} {signal['side']} {signal['calculated_lot']} Lot @ {signal['entry_price']}", level="INFO")
                 await ws_hub.broadcast("paper_position_opened", paper_pos)
 
-            # If auto-execute on physical mobile device is enabled
-            if cfg["auto_execute"] and signal["side"] in ["BUY", "SELL"]:
+            # If live autopilot / auto-execute on physical mobile device is enabled
+            if (cfg.get("live_autopilot_enabled") or cfg.get("auto_execute")) and signal["side"] in ["BUY", "SELL"]:
                 await _execute_signal_internal(signal["id"], request.app)
         except Exception as e:
             db.add_log(f"TradingAgents Tarama Hatası ({ticker}): {e}", level="ERROR")
@@ -195,12 +227,94 @@ async def _execute_signal_internal(signal_id: int, app: Any) -> dict[str, Any]:
     db.add_log(f"Sinyal Emre Dönüştürüldü: #{order['id']} ({signal['broker_symbol']} {signal['side']} {signal['calculated_lot']} Lot)", level="INFO")
 
     await ws_hub.broadcast("signal_executed", {"signal_id": signal_id, "order": order})
+    # Asenkron canlı icrayı fiziksel cihaza gönder
+    asyncio.create_task(dm.execute_order_async(order["id"]))
     return {"status": "order_created", "order": order}
 
 
 @router.post("/signals/{signal_id}/execute")
 async def execute_signal(signal_id: int, request: Request):
     return await _execute_signal_internal(signal_id, request.app)
+
+
+class TestTradeRequest(BaseModel):
+    ticker: Optional[str] = "EURUSD"
+    side: Optional[str] = "BUY"
+    lot: Optional[float] = 0.01
+    sl: Optional[float] = None
+    tp: Optional[float] = None
+
+
+@router.post("/test-trade")
+async def trigger_test_trade(payload: TestTradeRequest, request: Request):
+    engine = get_engine(request)
+    db = request.app.state.db
+    ws_hub = request.app.state.ws
+    cfg = engine.get_config()
+
+    ticker = (payload.ticker or "EURUSD").upper().replace(".PRO", "").strip()
+    broker_symbol = engine.format_broker_symbol(ticker)
+    side = payload.side.upper() if payload.side in ["BUY", "SELL"] else "BUY"
+    lot = payload.lot or 0.01
+
+    quote = engine.fetch_biquote_chart(ticker)
+    price = quote["price"] if quote and quote.get("price") else (1.0965 if "EUR" in ticker else 2650.0)
+
+    is_forex = "EUR" in ticker or "GBP" in ticker or "USD" in ticker
+    diff = 0.0050 if is_forex else 5.0
+    sl = payload.sl or (round(price - diff, 4 if is_forex else 2) if side == "BUY" else round(price + diff, 4 if is_forex else 2))
+    tp = payload.tp or (round(price + diff * 2, 4 if is_forex else 2) if side == "BUY" else round(price - diff * 2, 4 if is_forex else 2))
+
+    signal = db.create_signal({
+        "ticker": ticker,
+        "broker_symbol": broker_symbol,
+        "side": side,
+        "entry_price": price,
+        "sl": sl,
+        "tp": tp,
+        "risk_reward": 2.0,
+        "calculated_lot": lot,
+        "risk_amount": 10.0,
+        "confidence": 95,
+        "timeframe": "M15",
+        "status": "pending",
+        "reasoning": "Test emri: Simülasyon ve Canlı Otopilot entegrasyon doğrulaması.",
+    })
+    await ws_hub.broadcast("signal_created", signal)
+
+    paper_pos = None
+    if cfg.get("paper_trading", True):
+        paper_pos = db.create_paper_position({
+            "signal_id": signal["id"],
+            "symbol": broker_symbol,
+            "side": side,
+            "lot": lot,
+            "entry_price": price,
+            "current_price": price,
+            "sl": sl,
+            "tp": tp,
+            "risk_amount": 10.0,
+            "pnl": 0.0,
+            "timeframe": "M15",
+        })
+        db.update_signal_status(signal["id"], status="paper_active")
+        db.add_log(f"Test Simülasyon Pozisyonu Açıldı: {broker_symbol} {side} {lot} Lot @ {price}", level="INFO")
+        await ws_hub.broadcast("paper_position_opened", paper_pos)
+
+    live_result = None
+    live_enabled = cfg.get("live_autopilot_enabled", False)
+    if live_enabled:
+        db.add_log(f"Canlı Otopilot Devrede: Test sinyali #{signal['id']} fiziksel cihaza gönderiliyor...", level="INFO")
+        live_result = await _execute_signal_internal(signal["id"], request.app)
+    else:
+        db.add_log(f"Canlı Otopilot Kapalı: Sinyal #{signal['id']} yalnızca simülasyonda kaldı, telefona gönderilmedi.", level="INFO")
+
+    return {
+        "signal": signal,
+        "paper_position": paper_pos,
+        "live_autopilot_enabled": live_enabled,
+        "live_result": live_result,
+    }
 
 
 @router.post("/signals/{signal_id}/reject")
